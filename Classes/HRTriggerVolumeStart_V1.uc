@@ -6,7 +6,7 @@ var(HRScoreboard) HRTriggerVolumeFinish_V1 TrackFinishTrigger;
 
 simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocation, vector HitNormal)
 {
-	local ROPawn ROP;
+    local ROPawn ROP;
     local ROVehicle ROV;
 
     Super.Touch(Other, OtherComp, HitLocation, HitNormal);
@@ -17,10 +17,10 @@ simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocat
     }
 
     ROV = ROVehicle(Other);
-	if (ROV != none)
-	{
+    if (ROV != none)
+    {
         ROP = ROV.GetDriverForSeatIndex(0);
-	}
+    }
 
     if (ROP != None)
     {
