@@ -2,11 +2,7 @@ class HRTriggerVolumeFinish_V1 extends HRTriggerVolume_V1;
 
 simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocation, vector HitNormal)
 {
-	Super.Touch(Other, OtherComp, HitLocation, HitNormal);
-
-	if (ROVehicle(Other) != none)
-	{
-	}
+    // TODO: copy common stuff from start trigger.
 }
 
 DefaultProperties

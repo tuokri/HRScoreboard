@@ -6,11 +6,29 @@ var(HRScoreboard) HRTriggerVolumeFinish_V1 TrackFinishTrigger;
 
 simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocation, vector HitNormal)
 {
-	Super.Touch(Other, OtherComp, HitLocation, HitNormal);
+	local ROPawn ROP;
+    local ROVehicle ROV;
 
-	if (ROVehicle(Other) != none)
+    Super.Touch(Other, OtherComp, HitLocation, HitNormal);
+
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+
+    ROV = ROVehicle(Other);
+	if (ROV != none)
 	{
+        ROP = ROV.GetDriverForSeatIndex(0);
 	}
+
+    if (ROP != None)
+    {
+        if(ROP.PlayerReplicationInfo != None)
+        {
+            ScoreboardManager.PushRaceStats(ROP.PlayerReplicationInfo);
+        }
+    }
 }
 
 DefaultProperties
