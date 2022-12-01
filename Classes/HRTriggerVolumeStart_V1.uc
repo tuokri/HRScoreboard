@@ -1,7 +1,7 @@
 class HRTriggerVolumeStart_V1 extends HRTriggerVolume_V1;
 
 // Track finish trigger -- the HRTriggerVolumeFinish_V1 instance
-// that completes this Start-Finish pair.
+// that completes this Start-Finish pair. TODO: is this even needed?
 var(HRScoreboard) HRTriggerVolumeFinish_V1 TrackFinishTrigger;
 
 simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocation, vector HitNormal)
@@ -11,7 +11,7 @@ simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocat
 
     Super.Touch(Other, OtherComp, HitLocation, HitNormal);
 
-    if (Role != ROLE_Authority)
+    if (Role != ROLE_Authority || TrackFinishTrigger == None)
     {
         return;
     }
@@ -26,7 +26,10 @@ simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocat
     {
         if(ROP.PlayerReplicationInfo != None)
         {
-            ScoreboardManager.PushRaceStats(ROP.PlayerReplicationInfo);
+            if (ScoreboardManager != None)
+            {
+                ScoreboardManager.PushRaceStats(ROP.PlayerReplicationInfo);
+            }
         }
     }
 }

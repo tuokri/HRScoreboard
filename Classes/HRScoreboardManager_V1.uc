@@ -12,6 +12,10 @@ struct DateTime_V1
     var int MSec;
 };
 
+// TODO: think about other kind of stats to keep track of.
+// - distance traveled?
+// - average velocity?
+// - damage taken?
 struct RaceStats_V1
 {
     var PlayerReplicationInfo RacePRI;
@@ -34,7 +38,7 @@ event PostBeginPlay()
     }
 }
 
-// TODO: need to also store vehicle type.
+// TODO: need to also store vehicle type and something else?
 function PushRaceStats(PlayerReplicationInfo PRI)
 {
     local RaceStats_V1 NewStats;
