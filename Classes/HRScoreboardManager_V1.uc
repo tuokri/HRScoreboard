@@ -65,10 +65,10 @@ simulated event PostBeginPlay()
             SetTimer(1.0, True, 'TimerLoopDedicatedServer');
             break;
         case NM_Standalone:
-            SetTimer(1.0, True, 'TimerLoopStandalone');
+            SetTimer(0.5, True, 'TimerLoopStandalone');
             break;
         case NM_Client:
-            SetTimer(1.0, True, 'TimerLoopClient');
+            SetTimer(0.5, True, 'TimerLoopClient');
             break;
         default:
             `hrlog("ERROR:" @ WorldInfo.NetMode $ " is not supported");
@@ -207,7 +207,7 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
         self,
         PRI.PlayerName @ "finished in"
             @ RaceTimeToString(RaceStart, RaceFinish)
-            @ "with" @ OngoingRaceStats[Idx].Vehicle.Class.Name,
+            @ "with" @ OngoingRaceStats[Idx].Vehicle.Class,
         'Say'
     );
 
@@ -270,13 +270,15 @@ simulated function UpdateRaceStatArrays()
         ReplicatedRaceStats[Idx] = OngoingRaceStats[Idx];
     }
     ReplicatedRaceStatsCount = OngoingRaceStats.Length;
+
+    `hrlog("ReplicatedRaceStatsCount:" @ ReplicatedRaceStatsCount);
 }
 
 simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
 {
     local int Idx;
 
-    super.PostRenderFor(PC, Canvas, CameraPosition, CameraDir);
+    `hrlog("PC:" @ PC @ "Canvas:" @ Canvas @ "CameraPosition:" @ CameraPosition @ "CameraDir:" @ CameraDir);
 
     Canvas.Font = ScoreboardFont;
 
@@ -289,18 +291,25 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
             True
         );
     }
+
+    super.PostRenderFor(PC, Canvas, CameraPosition, CameraDir);
 }
 
 simulated function DrawScoreboard()
 {
     local ROPlayerController ROPC;
-    local int Idx;
-    local Canvas Canvas;
+    // local int Idx;
+    // local Canvas Canvas;
 
     ForEach LocalPlayerControllers(class'ROPlayerController', ROPC)
     {
-        if (ROPC != None && ROPC.myHud != None)
+        `hrlog("ROPC:" @ ROPC);
+
+        if (ROPC != None && ROPC.myHUD != None)
         {
+            ROPC.myHUD.AddPostRenderedActor(self);
+        /*
+
             Canvas = ROPC.myHud.Canvas;
             for (Idx = 0; Idx < ReplicatedRaceStatsCount; ++Idx)
             {
@@ -311,6 +320,7 @@ simulated function DrawScoreboard()
                     True
                 );
             }
+        */
         }
     }
 }
@@ -323,12 +333,12 @@ function TimerLoopDedicatedServer()
 simulated function TimerLoopStandalone()
 {
     UpdateRaceStatArrays();
-    // DrawScoreboard();
+    DrawScoreboard();
 }
 
 simulated function TimerLoopClient()
 {
-    // DrawScoreboard();
+    DrawScoreboard();
 }
 
 DefaultProperties
