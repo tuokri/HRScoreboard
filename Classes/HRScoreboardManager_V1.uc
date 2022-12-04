@@ -347,5 +347,6 @@ DefaultProperties
 	bOnlyDirtyReplication=True
 	bSkipActorPropertyReplication=True
 
+    bPostRenderIfNotVisible=True
     ScoreboardFont=Font'VN_UI_Mega_Fonts.Font_VN_Mega_36'
 }
