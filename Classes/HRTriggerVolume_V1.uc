@@ -1,3 +1,4 @@
+// Base class for all Helicopter Racing Trigger Volumes.
 class HRTriggerVolume_V1 extends ROTriggerVolume
     abstract;
 

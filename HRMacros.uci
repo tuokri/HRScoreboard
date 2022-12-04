@@ -1,0 +1,4 @@
+`define hrlog(msg, cond, tag) \
+    `log(self.class.name $ "::" $ GetFuncName() $ "(): " $ `msg, \
+    `cond, \
+    `if(`tag) name("HRScoreboard-" $ string(`tag)) `else 'HRScoreboard' `endif)
