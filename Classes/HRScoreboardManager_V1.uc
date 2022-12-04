@@ -2,6 +2,8 @@
 class HRScoreboardManager_V1 extends Actor
     placeable;
 
+// TODO: set up PRI for this actor to send messages with.
+
 struct DateTime_V1
 {
     var int Year;
@@ -355,7 +357,7 @@ DefaultProperties
 	NetUpdateFrequency=100
 	bHidden=True
 	bOnlyDirtyReplication=True
-	bSkipActorPropertyReplication=True
+	bSkipActorPropertyReplication=True // TODO: does this mess up PostRender?
 
     bPostRenderIfNotVisible=True
     ScoreboardFont=Font'VN_UI_Mega_Fonts.Font_VN_Mega_36'
