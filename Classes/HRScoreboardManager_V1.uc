@@ -35,6 +35,9 @@ struct RaceStats_V1
 // versions of the track.
 var(HRScoreboard) int LevelVersion;
 
+// The font to draw the HUD scoreboard with.
+var(HRScoreboard) Font ScoreboardFont;
+
 const MAX_REPLICATED = 255;
 var RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
 var byte ReplicatedRaceStatsCount;
@@ -204,7 +207,7 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
         self,
         PRI.PlayerName @ "finished in"
             @ RaceTimeToString(RaceStart, RaceFinish)
-            @ "with" @ OngoingRaceStats[Idx].Vehicle.Class,
+            @ "with" @ OngoingRaceStats[Idx].Vehicle.Class.Name,
         'Say'
     );
 
@@ -269,6 +272,25 @@ simulated function UpdateRaceStatArrays()
     ReplicatedRaceStatsCount = OngoingRaceStats.Length;
 }
 
+simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
+{
+    local int Idx;
+
+    super.PostRenderFor(PC, Canvas, CameraPosition, CameraDir);
+
+    Canvas.Font = ScoreboardFont;
+
+    for (Idx = 0; Idx < ReplicatedRaceStatsCount; ++Idx)
+    {
+        Canvas.SetPos(Canvas.SizeX - ((Canvas.SizeX / 5) + 96), (Canvas.SizeY / 5));
+        Canvas.DrawText(
+            ReplicatedRaceStats[Idx].RacePRI.PlayerName
+                @ WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart,
+            True
+        );
+    }
+}
+
 simulated function DrawScoreboard()
 {
     local ROPlayerController ROPC;
@@ -301,12 +323,12 @@ function TimerLoopDedicatedServer()
 simulated function TimerLoopStandalone()
 {
     UpdateRaceStatArrays();
-    DrawScoreboard();
+    // DrawScoreboard();
 }
 
 simulated function TimerLoopClient()
 {
-    DrawScoreboard();
+    // DrawScoreboard();
 }
 
 DefaultProperties
@@ -324,4 +346,6 @@ DefaultProperties
 	bHidden=True
 	bOnlyDirtyReplication=True
 	bSkipActorPropertyReplication=True
+
+    ScoreboardFont=Font'VN_UI_Mega_Fonts.Font_VN_Mega_36'
 }
