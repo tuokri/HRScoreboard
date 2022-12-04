@@ -25,7 +25,7 @@ simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocat
     {
         if (ScoreboardManager != None)
         {
-            ScoreboardManager.PopRaceStats(ROP);
+            ScoreboardManager.PopRaceStats(ROP, ROV);
         }
     }
 }

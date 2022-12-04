@@ -1,14 +1,6 @@
 // Helicopter Racing Scoreboard Manager.
-class HRScoreboardManager_V1 extends Info
+class HRScoreboardManager_V1 extends Actor
     placeable;
-
-// Level version number. Increase this number whenever the race
-// track is changed to distinguish race scores recorded on different
-// versions of the track.
-var(HRScoreboard) int LevelVersion;
-
-// Just for debugging / developing.
-var PlayerReplicationInfo DebugPRI;
 
 struct DateTime_V1
 {
@@ -22,6 +14,7 @@ struct DateTime_V1
     var int MSec;
 };
 
+// TODO: maybe just use RealTimeSeconds?
 // TODO: think about other kind of stats to keep track of.
 // - distance traveled?
 // - average velocity?
@@ -29,19 +22,59 @@ struct DateTime_V1
 struct RaceStats_V1
 {
     var PlayerReplicationInfo RacePRI;
-    var class<ROVehicle> VehicleClass;
-    var DateTime_V1 RaceStart;
+    var ROVehicle Vehicle;
+    var float RaceStart;
+
     // TODO: is this even needed?
+    // var DateTime_V1 RaceStart;
     // var DateTime_V1 RaceFinish;
 };
 
+// Level version number. Increase this number whenever the race
+// track is changed to distinguish race scores recorded on different
+// versions of the track.
+var(HRScoreboard) int LevelVersion;
+
+const MAX_REPLICATED = 255;
+var RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
+var byte ReplicatedRaceStatsCount;
+
 var private array<RaceStats_V1> OngoingRaceStats;
 
-event PostBeginPlay()
+// Just for debugging / developing.
+var PlayerReplicationInfo DebugPRI;
+
+replication
+{
+    if (bNetDirty && Role == ROLE_Authority)
+        ReplicatedRaceStats, ReplicatedRaceStatsCount;
+}
+
+simulated event PostBeginPlay()
 {
     local HRTriggerVolume_V1 HRTV;
 
     super.PostBeginPlay();
+
+    switch (WorldInfo.NetMode)
+    {
+        case NM_DedicatedServer:
+            SetTimer(1.0, True, 'TimerLoopDedicatedServer');
+            break;
+        case NM_Standalone:
+            SetTimer(1.0, True, 'TimerLoopStandalone');
+            break;
+        case NM_Client:
+            SetTimer(1.0, True, 'TimerLoopClient');
+            break;
+        default:
+            `hrlog("ERROR:" @ WorldInfo.NetMode $ " is not supported");
+    }
+
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
 
     ForEach AllActors(class'HRTriggerVolume_V1', HRTV)
     {
@@ -50,7 +83,6 @@ event PostBeginPlay()
     }
 }
 
-// TODO: need to also store vehicle type and something else?
 function PushRaceStats(ROPawn ROP, ROVehicle ROV)
 {
     local PlayerReplicationInfo PRI;
@@ -59,7 +91,7 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
 
     if(ROP.PlayerReplicationInfo == None)
     {
-        if (class'Engine'.static.IsEditor() || WorldInfo.NetMode == NM_Standalone)
+        if (WorldInfo.NetMode == NM_Standalone)
         {
             if (DebugPRI == None)
             {
@@ -88,8 +120,10 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
     }
 
     NewStats.RacePRI = PRI;
-    NewStats.VehicleClass = ROV.Class;
+    NewStats.Vehicle = ROV;
+    NewStats.RaceStart = WorldInfo.RealTimeSeconds;
 
+    /*
     GetSystemTime(
         NewStats.RaceStart.Year,
         NewStats.RaceStart.Month,
@@ -104,21 +138,27 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
     `hrlog("RaceStart.Min : " $ NewStats.RaceStart.Min);
     `hrlog("RaceStart.Sec : " $ NewStats.RaceStart.Sec);
     `hrlog("RaceStart.MSec: " $ NewStats.RaceStart.MSec);
+    */
 
+    // TODO: push finished races to separate array.
     OngoingRaceStats.AddItem(NewStats);
     `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 }
 
-function PopRaceStats(ROPawn ROP)
+function PopRaceStats(ROPawn ROP, ROVehicle ROV)
 {
     local int Idx;
+    local float RaceFinish;
+    local float RaceStart;
     local PlayerReplicationInfo PRI;
-    local DateTime_V1 RaceFinish;
-    local RaceStats_V1 RaceStats;
+
+    // local RaceStats_V1 RaceStats;
+    // local DateTime_V1 RaceStart;
+    // local DateTime_V1 RaceFinish;
 
     if(ROP.PlayerReplicationInfo == None)
     {
-        if ((class'Engine'.static.IsEditor() || WorldInfo.NetMode == NM_Standalone) && DebugPRI != None)
+        if (WorldInfo.NetMode == NM_Standalone && DebugPRI != None)
         {
             PRI = DebugPRI;
         }
@@ -132,7 +172,9 @@ function PopRaceStats(ROPawn ROP)
         PRI = ROP.PlayerReplicationInfo;
     }
 
-    `hrlog("ROP: " $ ROP $ " PRI: " $ PRI);
+    RaceFinish = WorldInfo.RealTimeSeconds;
+
+    `hrlog("ROP: " $ ROP $ " PRI: " $ PRI $ " ROV: " $ ROV);
 
     Idx = OngoingRaceStats.Find('RacePRI', PRI);
     if (Idx == INDEX_NONE)
@@ -140,6 +182,7 @@ function PopRaceStats(ROPawn ROP)
         return;
     }
 
+    /*
     GetSystemTime(
         RaceFinish.Year,
         RaceFinish.Month,
@@ -150,28 +193,50 @@ function PopRaceStats(ROPawn ROP)
         RaceFinish.Sec,
         RaceFinish.MSec
     );
-
-    RaceStats = OngoingRaceStats[Idx];
-
-    // TODO: Handle successfully finished race.
     `hrlog("RaceFinish.Hour: " $ RaceFinish.Hour);
     `hrlog("RaceFinish.Min : " $ RaceFinish.Min);
     `hrlog("RaceFinish.Sec : " $ RaceFinish.Sec);
     `hrlog("RaceFinish.MSec: " $ RaceFinish.MSec);
+    */
 
+    RaceStart = OngoingRaceStats[Idx].RaceStart;
     WorldInfo.Game.Broadcast(
         self,
         PRI.PlayerName @ "finished in"
-            @ RaceTimeToString(RaceStats.RaceStart, RaceFinish)
-            @ "with" @ RaceStats.VehicleClass,
+            @ RaceTimeToString(RaceStart, RaceFinish)
+            @ "with" @ OngoingRaceStats[Idx].Vehicle.Class,
         'Say'
     );
+
+    if (OngoingRaceStats[Idx].Vehicle != ROV)
+    {
+        `hrlog("ERROR:" @ ROP @ PRI @ PRI.PlayerName
+            @ "vehicle changed during race:" @ OngoingRaceStats[Idx].Vehicle @ "!=" @ ROV);
+    }
 
     OngoingRaceStats.Remove(Idx, 1);
     `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 }
 
-function string RaceTimeToString(const out DateTime_V1 S, const out DateTime_V1 F)
+final function string RaceTimeToString(float S, float F)
+{
+    local float TotalSecs;
+    local int Hours;
+    local int Mins;
+    local int Secs;
+    local int MSecs;
+
+    TotalSecs = F - S;
+    Hours = TotalSecs / 3600;
+    Mins = (TotalSecs - (Hours * 3600)) / 60;
+    Secs = TotalSecs - (Hours * 3600) - (Mins * 60);
+    MSecs = Round((TotalSecs - int(TotalSecs)) * 1000000);
+
+    return Hours $ ":" $ Mins $ ":" $ Secs $ "." $ MSecs;
+}
+
+/*
+final function string RaceDateTimeToString(const out DateTime_V1 S, const out DateTime_V1 F)
 {
     local float TotalSecs;
     local int Hours;
@@ -187,18 +252,76 @@ function string RaceTimeToString(const out DateTime_V1 S, const out DateTime_V1 
     Hours = TotalSecs / 3600;
     Mins = (TotalSecs - (Hours * 3600)) / 60;
     Secs = TotalSecs - (Hours * 3600) - (Mins * 60);
-    MSecs = Round((TotalSecs - int(TotalSecs)) * 1000);
+    MSecs = Round((TotalSecs - int(TotalSecs)) * 1000000);
 
     return Hours $ ":" $ Mins $ ":" $ Secs $ "." $ MSecs;
+}
+*/
+
+simulated function UpdateRaceStatArrays()
+{
+    local int Idx;
+
+    for (Idx = 0; Idx < OngoingRaceStats.Length; ++Idx)
+    {
+        ReplicatedRaceStats[Idx] = OngoingRaceStats[Idx];
+    }
+    ReplicatedRaceStatsCount = OngoingRaceStats.Length;
+}
+
+simulated function DrawScoreboard()
+{
+    local ROPlayerController ROPC;
+    local int Idx;
+    local Canvas Canvas;
+
+    ForEach LocalPlayerControllers(class'ROPlayerController', ROPC)
+    {
+        if (ROPC != None && ROPC.myHud != None)
+        {
+            Canvas = ROPC.myHud.Canvas;
+            for (Idx = 0; Idx < ReplicatedRaceStatsCount; ++Idx)
+            {
+                Canvas.SetPos(Canvas.SizeX - (Canvas.SizeX / 10), (Canvas.SizeY / 5));
+                Canvas.DrawText(
+                    ReplicatedRaceStats[Idx].RacePRI.PlayerName
+                        @ WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart,
+                    True
+                );
+            }
+        }
+    }
+}
+
+function TimerLoopDedicatedServer()
+{
+    UpdateRaceStatArrays();
+}
+
+simulated function TimerLoopStandalone()
+{
+    UpdateRaceStatArrays();
+    DrawScoreboard();
+}
+
+simulated function TimerLoopClient()
+{
+    DrawScoreboard();
 }
 
 DefaultProperties
 {
-    LevelVersion=0
-    NetUpdateFrequency=100
+	Begin Object Class=SpriteComponent Name=Sprite
+		Sprite=Texture2D'EditorResources.Corpse'
+		HiddenGame=True
+		AlwaysLoadOnClient=False
+		AlwaysLoadOnServer=False
+	End Object
+	Components.Add(Sprite)
 
-    Begin Object NAME=Sprite
-        Sprite=Texture2D'EditorResources.Corpse'
-        Scale=2.0
-    End Object
+    RemoteRole=ROLE_SimulatedProxy
+	NetUpdateFrequency=100
+	bHidden=True
+	bOnlyDirtyReplication=True
+	bSkipActorPropertyReplication=True
 }
