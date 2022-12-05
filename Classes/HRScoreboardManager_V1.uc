@@ -20,6 +20,7 @@ struct RaceStats_V1
     var PlayerReplicationInfo RacePRI;
     var ROVehicle Vehicle;
     var float RaceStart;
+    var float RaceFinish;
 
     // TODO: is this even needed?
     // var DateTime_V1 RaceStart;
@@ -59,21 +60,27 @@ var(HRScoreboard) FontRenderInfo ScoreboardFontRenderInfo;
 var(HRScoreboard) string ChatName;
 
 // Scoreboard backend server host. Only change if you know what you are doing.
+// Default = todo.todo.com.
 var(HRScoreboard) string BackendHost;
 // Scoreboard backend server port. Only change if you know what you are doing.
+// Default = 54231.
 var(HRScoreboard) int BackendPort;
 
 // Used to determine max scoreboard width.
 var() string SizeTestString;
 
-// TODO: Used to send chat messages with.
-var Controller DummyController;
+var HRChatRelay_V1 ChatRelay;
 
 const MAX_REPLICATED = 255;
 var RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
+var RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
 var byte ReplicatedRaceStatsCount;
+var byte ReplicatedFinishedRaceStatsCount;
 
 var private array<RaceStatsComplex_V1> OngoingRaceStats;
+var private array<RaceStatsComplex_V1> FinishedRaces;
+
+var byte MaxFinishedRaces;
 
 var float MinWayPointUpdateInterval;
 
@@ -83,7 +90,8 @@ var PlayerReplicationInfo DebugPRI;
 replication
 {
     if (bNetDirty && Role == ROLE_Authority)
-        ReplicatedRaceStats, ReplicatedRaceStatsCount;
+        ReplicatedRaceStats, ReplicatedRaceStatsCount, ReplicatedFinishedRaces,
+        ReplicatedFinishedRaceStatsCount;
 }
 
 simulated event PostBeginPlay()
@@ -123,11 +131,11 @@ simulated event PostBeginPlay()
 
 event Destroyed()
 {
-    super.Destroyed();
-    if (DummyController != None)
+    if (ChatRelay != None)
     {
-        DummyController.Destroy();
+        ChatRelay.Destroy();
     }
+    super.Destroyed();
 }
 
 function PushRaceStats(ROPawn ROP, ROVehicle ROV)
@@ -190,7 +198,7 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
     */
 
     OngoingRaceStats.AddItem(NewStats);
-    `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
+    // `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 
     // TODO: not a good place for this. Can spam network.
     // ClientStartDrawHUD(ROP.Controller);
@@ -251,8 +259,10 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
     */
 
     RaceStart = OngoingRaceStats[Idx].RaceStart;
+    OngoingRaceStats[Idx].RaceFinish = RaceFinish;
+
     WorldInfo.Game.Broadcast(
-        self,
+        ChatRelay,
         PRI.PlayerName @ "finished in"
             @ RaceTimeToString(RaceStart, RaceFinish)
             @ "with" @ VehicleClassToString(OngoingRaceStats[Idx].Vehicle.Class),
@@ -264,11 +274,13 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
         `hrlog("ERROR:" @ ROP @ PRI @ PRI.PlayerName
             @ "vehicle changed during race:" @ OngoingRaceStats[Idx].Vehicle @ "!=" @ ROV);
     }
+    else
+    {
+        FinishedRaces.AddItem(OngoingRaceStats[Idx]);
+    }
 
     OngoingRaceStats.Remove(Idx, 1);
-    `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
-
-    // TODO: push finished races to a separate array.
+    // `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 }
 
 static function string VehicleClassToString(class<ROVehicle> VehicleClass)
@@ -353,36 +365,49 @@ simulated function UpdateRaceStatArrays()
 
     for (Idx = 0; Idx < OngoingRaceStats.Length; ++Idx)
     {
-        ReplicatedRaceStats[Idx].RacePRI = OngoingRaceStats[Idx].RacePRI;
-        ReplicatedRaceStats[Idx].Vehicle = OngoingRaceStats[Idx].Vehicle;
-        ReplicatedRaceStats[Idx].RaceStart = OngoingRaceStats[Idx].RaceStart;
-
         ROV = OngoingRaceStats[Idx].Vehicle;
         `hrlog("ROV:" @ ROV);
         if (ROV != None)
         {
+            // TODO: need to set a grace period of sorts? In case a "dead" vehicle crosses the finish line?
             if(ROV.IsPendingKill() || ROV.bDeadVehicle)
             {
                 OngoingRaceStats[Idx].LastWayPointUpdateTime = WorldInfo.RealTimeSeconds;
                 OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
                 OngoingRaceStats[Idx].Vehicle = None;
-
-                ReplicatedRaceStats[Idx].Vehicle = None;
             }
+            else
+            {
+                if (WorldInfo.RealTimeSeconds >= (
+                    OngoingRaceStats[Idx].LastWayPointUpdateTime + MinWayPointUpdateInterval))
+                {
+                    OngoingRaceStats[Idx].LastWayPointUpdateTime = WorldInfo.RealTimeSeconds;
+                    OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
+                }
+            }
+
+            ReplicatedRaceStats[Idx].RacePRI = OngoingRaceStats[Idx].RacePRI;
+            ReplicatedRaceStats[Idx].Vehicle = OngoingRaceStats[Idx].Vehicle;
+            ReplicatedRaceStats[Idx].RaceStart = OngoingRaceStats[Idx].RaceStart;
         }
         else
         {
-            if (WorldInfo.RealTimeSeconds >= (
-                OngoingRaceStats[Idx].LastWayPointUpdateTime + MinWayPointUpdateInterval))
-            {
-                OngoingRaceStats[Idx].LastWayPointUpdateTime = WorldInfo.RealTimeSeconds;
-                OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
-            }
+            OngoingRaceStats.Remove(Idx--, 1);
         }
     }
+
     ReplicatedRaceStatsCount = OngoingRaceStats.Length;
 
-    // `hrlog("ReplicatedRaceStatsCount:" @ ReplicatedRaceStatsCount);
+    // TODO: Needless copies? Better way to do this?
+    for (Idx = 0; Idx < FinishedRaces.Length; ++Idx)
+    {
+        ReplicatedFinishedRaces[Idx].RacePRI = FinishedRaces[Idx].RacePRI;
+        ReplicatedFinishedRaces[Idx].Vehicle = FinishedRaces[Idx].Vehicle;
+        ReplicatedFinishedRaces[Idx].RaceStart = FinishedRaces[Idx].RaceStart;
+        ReplicatedFinishedRaces[Idx].RaceFinish = FinishedRaces[Idx].RaceFinish;
+    }
+
+    ReplicatedFinishedRaceStatsCount = FinishedRaces.Length;
 }
 
 simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
@@ -401,7 +426,7 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
 
     Canvas.Font = ScoreboardFont;
     Canvas.TextSize(SizeTestString, TextSize.X, TextSize.Y);
-    BGHeight = TextSize.Y * ReplicatedRaceStatsCount + 5;
+    BGHeight = TextSize.Y * ReplicatedRaceStatsCount + 10;
     BGWidth = TextSize.X + 5;
 
     Canvas.SetPos(Canvas.SizeX - ((Canvas.SizeX / 6) + BGWidth), (Canvas.SizeY / 6));
@@ -509,4 +534,5 @@ DefaultProperties
     SizeTestString="CharacterTestNameString123 99999.99999"
 
     MinWayPointUpdateInterval=5.0
+    MaxFinishedRaces=32
 }
