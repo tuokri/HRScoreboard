@@ -1,6 +1,7 @@
 // Helicopter Racing Scoreboard Manager.
 class HRScoreboardManager_V1 extends Actor
-    placeable;
+    placeable
+    config(HRScoreboardManager_V1);
 
 struct DateTime_V1
 {
@@ -38,6 +39,23 @@ struct RaceStatsComplex_V1 extends RaceStats_V1
     var float LastWayPointUpdateTime;
 };
 
+// Race stats stored in a config file.
+struct StoredRaceStats_V1
+{
+    var string PlayerName;
+    var string PlayerUniqueId;
+    var string VehicleClass;
+    var string LevelName;
+    var int LevelVersion;
+    var float TotalTimeSeconds;
+    var DateTime_V1 FinishDateTime;
+};
+
+// Sorted top score stats array in a config file.
+var config array<StoredRaceStats_V1> StoredTopScoreRaceStats;
+
+var(HRScoreboard) int MaxStoredTopScoreRaceStatsInConfigFile<ToolTip=Max number of race stats stored in the config file.|ClampMin=1|ClampMax=1000>;
+
 // Level version number. Increase this number whenever the race
 // track is changed to distinguish between race scores recorded
 // on different versions of the track.
@@ -56,7 +74,7 @@ var(HRScoreboard) Color ScoreboardTextColor;
 // Scoreboard text render settings.
 var(HRScoreboard) FontRenderInfo ScoreboardFontRenderInfo;
 
-// TODO: The name scoreboard manager uses when posting chat messages.
+// The name scoreboard manager uses when posting chat messages.
 var(HRScoreboard) string ChatName;
 
 // Scoreboard backend server host. Only change if you know what you are doing.
@@ -66,23 +84,28 @@ var(HRScoreboard) string BackendHost;
 // Default = 54231.
 var(HRScoreboard) int BackendPort;
 
+// Max number of finished races to display in the HUD scoreboard.
+var(HRScoreboard) byte MaxFinishedRaces;
+
 // Used to determine max scoreboard width.
 var() string SizeTestString;
 
-var HRChatRelay_V1 ChatRelay;
+var() private editconst class<HRChatRelay_V1> ChatRelayClass;
+var() private editconst HRChatRelay_V1 ChatRelay;
 
 const MAX_REPLICATED = 255;
-var RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
-var RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
-var byte ReplicatedRaceStatsCount;
-var byte ReplicatedFinishedRaceStatsCount;
+var() RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
+var() RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
+var() byte ReplicatedRaceStatsCount;
+var() byte ReplicatedFinishedRaceStatsCount;
 
-var private array<RaceStatsComplex_V1> OngoingRaceStats;
-var private array<RaceStatsComplex_V1> FinishedRaces;
+// Ongoing races for this session.
+var() private array<RaceStatsComplex_V1> OngoingRaceStats;
+// Races finished during this session.
+var() private array<RaceStatsComplex_V1> FinishedRaces;
 
-var byte MaxFinishedRaces;
-
-var float MinWayPointUpdateInterval;
+// Minimum interval between race waypoint updates.
+var() float MinWayPointUpdateIntervalSeconds;
 
 // Just for debugging / developing.
 var PlayerReplicationInfo DebugPRI;
@@ -120,6 +143,11 @@ simulated event PostBeginPlay()
     if (Role != ROLE_Authority)
     {
         return;
+    }
+
+    if (ChatRelay == None)
+    {
+        ChatRelay = Spawn(ChatRelayClass, self);
     }
 
     ForEach AllActors(class'HRTriggerVolume_V1', HRTV)
@@ -276,11 +304,55 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
     }
     else
     {
-        FinishedRaces.AddItem(OngoingRaceStats[Idx]);
+        StoreFinishedRace(OngoingRaceStats[Idx]);
     }
 
     OngoingRaceStats.Remove(Idx, 1);
     // `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
+}
+
+function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
+{
+    local DateTime_V1 FinishDateTime;
+    local int Idx;
+
+    FinishedRaces[FinishedRaces.Length] = RaceStats;
+    FinishedRaces.Sort(SortDelegate_RaceStatsComplex_V1);
+
+    if (FinishedRaces.Length > MaxFinishedRaces)
+    {
+        FinishedRaces.Length = MaxFinishedRaces;
+    }
+
+    Idx = StoredTopScoreRaceStats.Length + 1;
+    StoredTopScoreRaceStats.Length = Idx;
+
+    StoredTopScoreRaceStats[Idx].PlayerName = RaceStats.RacePRI.PlayerName;
+    StoredTopScoreRaceStats[Idx].PlayerUniqueId = class'OnlineSubsystem'.static.UniqueNetIdToString(RaceStats.RacePRI.UniqueId);
+    StoredTopScoreRaceStats[Idx].VehicleClass = string(RaceStats.Vehicle.Class);
+    StoredTopScoreRaceStats[Idx].LevelName = WorldInfo.GetMapName(True);
+    StoredTopScoreRaceStats[Idx].LevelVersion = LevelVersion;
+    StoredTopScoreRaceStats[Idx].TotalTimeSeconds = RaceStats.RaceFinish - RaceStats.RaceStart;
+    GetSystemTime(
+        FinishDateTime.Year,
+        FinishDateTime.Month,
+        FinishDateTime.DayOfWeek,
+        FinishDateTime.Day,
+        FinishDateTime.Hour,
+        FinishDateTime.Min,
+        FinishDateTime.Sec,
+        FinishDateTime.MSec
+    );
+    StoredTopScoreRaceStats[Idx].FinishDateTime = FinishDateTime;
+
+    StoredTopScoreRaceStats.Sort(SortDelegate_StoredRaceStats_V1);
+
+    if (StoredTopScoreRaceStats.Length > MaxStoredTopScoreRaceStatsInConfigFile)
+    {
+        StoredTopScoreRaceStats.Length = MaxStoredTopScoreRaceStatsInConfigFile;
+    }
+
+    SaveConfig();
 }
 
 static function string VehicleClassToString(class<ROVehicle> VehicleClass)
@@ -379,7 +451,7 @@ simulated function UpdateRaceStatArrays()
             else
             {
                 if (WorldInfo.RealTimeSeconds >= (
-                    OngoingRaceStats[Idx].LastWayPointUpdateTime + MinWayPointUpdateInterval))
+                    OngoingRaceStats[Idx].LastWayPointUpdateTime + MinWayPointUpdateIntervalSeconds))
                 {
                     OngoingRaceStats[Idx].LastWayPointUpdateTime = WorldInfo.RealTimeSeconds;
                     OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
@@ -419,15 +491,22 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
 
     // `hrlog("PC:" @ PC @ "Canvas:" @ Canvas @ "CameraPosition:" @ CameraPosition @ "CameraDir:" @ CameraDir);
 
-    if (ReplicatedRaceStatsCount == 0)
+    if ((ReplicatedRaceStatsCount == 0) && (ReplicatedFinishedRaceStatsCount == 0))
     {
         return;
     }
 
+
     Canvas.Font = ScoreboardFont;
     Canvas.TextSize(SizeTestString, TextSize.X, TextSize.Y);
-    BGHeight = TextSize.Y * ReplicatedRaceStatsCount + 10;
+    BGHeight = (TextSize.Y * (ReplicatedRaceStatsCount + ReplicatedFinishedRaceStatsCount)) + 10;
     BGWidth = TextSize.X + 5;
+
+    // 1 more row for separator.
+    if (ReplicatedFinishedRaceStatsCount > 0)
+    {
+        BGHeight += TextSize.Y;
+    }
 
     Canvas.SetPos(Canvas.SizeX - ((Canvas.SizeX / 6) + BGWidth), (Canvas.SizeY / 6));
     Canvas.DrawTileStretched(ScoreboardBGTex, BGWidth, BGHeight, 0, 0, BGWidth, BGHeight, ScoreboardBGTint);
@@ -443,6 +522,20 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
             Canvas.DrawText(
                 ReplicatedRaceStats[Idx].RacePRI.PlayerName
                     @ WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart,
+                True
+            );
+        }
+    }
+
+    if (ReplicatedFinishedRaceStatsCount > 0)
+    {
+        //              "CharacterTestNameString123 99999.99999"
+        Canvas.DrawText("--------- SESSION LEADERBOARD --------", True);
+        for (Idx = 0; Idx < ReplicatedFinishedRaceStatsCount; ++Idx)
+        {
+            Canvas.DrawText(
+                Idx $ "." @ ReplicatedFinishedRaces[Idx].RacePRI.PlayerName
+                    @ ReplicatedFinishedRaces[Idx].RaceFinish - ReplicatedFinishedRaces[Idx].RaceStart,
                 True
             );
         }
@@ -501,6 +594,18 @@ simulated function TimerLoopClient()
     DrawScoreboard();
 }
 
+// Ascending sort based on total race time.
+function int SortDelegate_StoredRaceStats_V1(const out StoredRaceStats_V1 A, const out StoredRaceStats_V1 B)
+{
+    return B.TotalTimeSeconds - A.TotalTimeSeconds;
+}
+
+// Ascending sort based on total race time.
+function int SortDelegate_RaceStatsComplex_V1(const out RaceStatsComplex_V1 A, const out RaceStatsComplex_V1 B)
+{
+    return (B.RaceFinish - B.RaceStart) - (A.RaceFinish - A.RaceStart);
+}
+
 DefaultProperties
 {
 	Begin Object Class=SpriteComponent Name=Sprite
@@ -533,6 +638,10 @@ DefaultProperties
 
     SizeTestString="CharacterTestNameString123 99999.99999"
 
-    MinWayPointUpdateInterval=5.0
+    MinWayPointUpdateIntervalSeconds=5.0
     MaxFinishedRaces=32
+
+    MaxStoredTopScoreRaceStatsInConfigFile=250
+
+    ChatRelayClass=class'HRChatRelay_V1'
 }
