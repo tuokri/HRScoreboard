@@ -608,20 +608,20 @@ function int SortDelegate_RaceStatsComplex_V1(const out RaceStatsComplex_V1 A, c
 
 DefaultProperties
 {
-	Begin Object Class=SpriteComponent Name=Sprite
-		Sprite=Texture2D'EditorResources.Corpse'
-		HiddenGame=True
-		AlwaysLoadOnClient=False
-		AlwaysLoadOnServer=False
-	End Object
-	Components.Add(Sprite)
+    Begin Object Class=SpriteComponent Name=Sprite
+        Sprite=Texture2D'EditorResources.Corpse'
+        HiddenGame=True
+        AlwaysLoadOnClient=False
+        AlwaysLoadOnServer=False
+    End Object
+    Components.Add(Sprite)
 
     RemoteRole=ROLE_SimulatedProxy
-	NetUpdateFrequency=100
-	bHidden=True
-	bOnlyDirtyReplication=True
+    NetUpdateFrequency=100
+    bHidden=True
+    bOnlyDirtyReplication=True
     bAlwaysRelevant=True
-	bSkipActorPropertyReplication=True
+    bSkipActorPropertyReplication=True
     bPostRenderIfNotVisible=True
 
     ScoreboardFont=Font'EngineFonts.SmallFont'
