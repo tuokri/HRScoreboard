@@ -43,7 +43,8 @@ final function CheckResolveStatus()
     }
     if (bRetryOnFail)
     {
-        ResolveBackend();
+        Owner.SetTimer(4.0, False, 'CheckResolveStatus');
+        SetTimer(2.0, False, 'ResolveBackend');
     }
 }
 
