@@ -3,20 +3,6 @@ class HRScoreboardManager_V1 extends Actor
     placeable
     config(HRScoreboardManager_V1);
 
-/*
-struct DateTime_V1
-{
-    var int Year;
-    var int Month;
-    var int DayOfWeek;
-    var int Day;
-    var int Hour;
-    var int Min;
-    var int Sec;
-    var int MSec;
-};
-*/
-
 // Race stats base struct. All values replicated.
 struct RaceStats_V1
 {
@@ -109,10 +95,10 @@ var() private array<RaceStatsComplex_V1> OngoingRaceStats;
 var() private array<RaceStatsComplex_V1> FinishedRaces;
 
 // Minimum interval between race waypoint updates.
-var() float MinWayPointUpdateIntervalSeconds;
+var() private editconst float MinWayPointUpdateIntervalSeconds;
 
 // Just for debugging / developing.
-var PlayerReplicationInfo DebugPRI;
+var() private editconst PlayerReplicationInfo DebugPRI;
 
 const HUEY_NAME = "Huey";
 const COBRA_NAME = "Cobra";
@@ -135,7 +121,7 @@ simulated function SanityCheckConfig()
 
     if (ConfigVersion != CURRENT_CONFIG_VERSION)
     {
-        `hrlog("WARNING: config version changed" @ "(" $ ConfigVersion
+        `hrwarn("config version changed" @ "(" $ ConfigVersion
             @ "->" @ CURRENT_CONFIG_VERSION $ ")" @ "-- wiping all stored stats!");
         ConfigVersion = CURRENT_CONFIG_VERSION;
         StoredTopScoreRaceStats.Length = 0;
@@ -163,11 +149,13 @@ simulated event PostBeginPlay()
 {
     local HRTriggerVolume_V1 HRTV;
 
+    `hrlog(self @ "initializing");
+
     super.PostBeginPlay();
 
     SanityCheckConfig();
 
-    `hrlog("WorldInfo.NetMode:" @ WorldInfo.NetMode);
+    `hrdebug("WorldInfo.NetMode:" @ WorldInfo.NetMode);
 
     switch (WorldInfo.NetMode)
     {
@@ -181,7 +169,7 @@ simulated event PostBeginPlay()
             SetTimer(1.0, True, 'TimerLoopClient');
             break;
         default:
-            `hrlog("WARNING:" @ WorldInfo.NetMode @ "is not tested");
+            `hrwarn(WorldInfo.NetMode @ "is not tested");
             SetTimer(1.0, True, 'TimerLoopStandalone');
     }
 
@@ -238,12 +226,12 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
         PRI = ROP.PlayerReplicationInfo;
     }
 
-    `hrlog("ROP: " $ ROP $ " PRI: " $ PRI $ " ROV: " $ ROV);
+    `hrdebug("ROP: " $ ROP $ " PRI: " $ PRI $ " ROV: " $ ROV);
 
     Idx = OngoingRaceStats.Find('RacePRI', PRI);
     if (Idx != INDEX_NONE)
     {
-        `hrlog("removing existing PRI: " $ PRI);
+        `hrdebug("removing existing PRI: " $ PRI);
         OngoingRaceStats.Remove(Idx, 1);
     }
 
@@ -253,28 +241,8 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
     NewStats.WayPoints.AddItem(ROV.Location);
     NewStats.LastWayPointUpdateTime = NewStats.RaceStart;
 
-    /*
-    GetSystemTime(
-        NewStats.RaceStart.Year,
-        NewStats.RaceStart.Month,
-        NewStats.RaceStart.DayOfWeek,
-        NewStats.RaceStart.Day,
-        NewStats.RaceStart.Hour,
-        NewStats.RaceStart.Min,
-        NewStats.RaceStart.Sec,
-        NewStats.RaceStart.MSec
-    );
-    `hrlog("RaceStart.Hour: " $ NewStats.RaceStart.Hour);
-    `hrlog("RaceStart.Min : " $ NewStats.RaceStart.Min);
-    `hrlog("RaceStart.Sec : " $ NewStats.RaceStart.Sec);
-    `hrlog("RaceStart.MSec: " $ NewStats.RaceStart.MSec);
-    */
-
     OngoingRaceStats.AddItem(NewStats);
-    // `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
-
-    // TODO: not a good place for this. Can spam network.
-    // ClientStartDrawHUD(ROP.Controller);
+    // `hrdebug("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 }
 
 function PopRaceStats(ROPawn ROP, ROVehicle ROV)
@@ -285,10 +253,6 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
     local float RaceStart;
     local PlayerReplicationInfo PRI;
 
-    // local RaceStats_V1 RaceStats;
-    // local DateTime_V1 RaceStart;
-    // local DateTime_V1 RaceFinish;
-
     if(ROP.PlayerReplicationInfo == None)
     {
         if (WorldInfo.NetMode == NM_Standalone && DebugPRI != None)
@@ -297,7 +261,7 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
         }
         else
         {
-            `hrlog("ERROR: cannot pop race stats, PRI is null");
+            `hrerror("cannot pop race stats, PRI is null");
             return;
         }
     }
@@ -308,30 +272,13 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
 
     RaceFinish = WorldInfo.RealTimeSeconds;
 
-    `hrlog("ROP: " $ ROP $ " PRI: " $ PRI $ " ROV: " $ ROV);
+    `hrdebug("ROP: " $ ROP $ " PRI: " $ PRI $ " ROV: " $ ROV);
 
     Idx = OngoingRaceStats.Find('RacePRI', PRI);
     if (Idx == INDEX_NONE)
     {
         return;
     }
-
-    /*
-    GetSystemTime(
-        RaceFinish.Year,
-        RaceFinish.Month,
-        RaceFinish.DayOfWeek,
-        RaceFinish.Day,
-        RaceFinish.Hour,
-        RaceFinish.Min,
-        RaceFinish.Sec,
-        RaceFinish.MSec
-    );
-    `hrlog("RaceFinish.Hour: " $ RaceFinish.Hour);
-    `hrlog("RaceFinish.Min : " $ RaceFinish.Min);
-    `hrlog("RaceFinish.Sec : " $ RaceFinish.Sec);
-    `hrlog("RaceFinish.MSec: " $ RaceFinish.MSec);
-    */
 
     RaceStart = OngoingRaceStats[Idx].RaceStart;
     OngoingRaceStats[Idx].RaceFinish = RaceFinish;
@@ -344,7 +291,7 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
 
     if (OngoingRaceStats[Idx].Vehicle != ROV)
     {
-        `hrlog("ERROR:" @ ROP @ PRI @ PRI.PlayerName
+        `hrerror(ROP @ PRI @ PRI.PlayerName
             @ "vehicle changed during race:" @ OngoingRaceStats[Idx].Vehicle @ "!=" @ ROV);
     }
     else
@@ -353,7 +300,7 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
     }
 
     OngoingRaceStats.Remove(Idx, 1);
-    // `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
+    // `hrdebug("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 }
 
 // TODO: sorting long struct arrays is going to do a lot of copying.
@@ -365,11 +312,11 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
 
     if (RaceStats.RacePRI == None)
     {
-        `hrlog("ERROR: cannot store finished race, RacePRI is null");
+        `hrerror("cannot store finished race, RacePRI is null");
         return;
     }
 
-    `hrlog("before sort: FinishedRaces.Length" @ FinishedRaces.Length);
+    `hrdebug("before sort: FinishedRaces.Length" @ FinishedRaces.Length);
 
     FinishedRaces.AddItem(RaceStats);
     if (FinishedRaces.Length > 1)
@@ -377,7 +324,7 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
         FinishedRaces.Sort(SortDelegate_RaceStatsComplex_V1);
     }
 
-    `hrlog("after sort: FinishedRaces.Length" @ FinishedRaces.Length);
+    `hrdebug("after sort: FinishedRaces.Length" @ FinishedRaces.Length);
     if (FinishedRaces.Length > MaxFinishedRaces)
     {
         FinishedRaces.Length = MaxFinishedRaces;
@@ -386,25 +333,25 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
     Idx = StoredTopScoreRaceStats.Length;
     StoredTopScoreRaceStats.Length = Idx + 1;
 
-    `hrlog("Idx:" @ Idx);
-    `hrlog("StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
+    `hrdebug("Idx:" @ Idx);
+    `hrdebug("StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
 
     StoredTopScoreRaceStats[Idx].PlayerName = RaceStats.RacePRI.PlayerName;
-    `hrlog("StoredTopScoreRaceStats[Idx].PlayerName" @ StoredTopScoreRaceStats[Idx].PlayerName);
     StoredTopScoreRaceStats[Idx].PlayerUniqueId = class'OnlineSubsystem'.static.UniqueNetIdToString(RaceStats.RacePRI.UniqueId);
-    `hrlog("StoredTopScoreRaceStats[Idx].PlayerUniqueId" @ StoredTopScoreRaceStats[Idx].PlayerUniqueId);
     StoredTopScoreRaceStats[Idx].VehicleClass = string(RaceStats.Vehicle.Class);
-    `hrlog("StoredTopScoreRaceStats[Idx].VehicleClass" @ StoredTopScoreRaceStats[Idx].VehicleClass);
     StoredTopScoreRaceStats[Idx].LevelName = WorldInfo.GetMapName(True);
-    `hrlog("StoredTopScoreRaceStats[Idx].LevelName" @ StoredTopScoreRaceStats[Idx].LevelName);
     StoredTopScoreRaceStats[Idx].LevelVersion = LevelVersion;
-    `hrlog("StoredTopScoreRaceStats[Idx].LevelVersion" @ StoredTopScoreRaceStats[Idx].LevelVersion);
     StoredTopScoreRaceStats[Idx].TotalTimeSeconds = RaceStats.RaceFinish - RaceStats.RaceStart;
-    `hrlog("StoredTopScoreRaceStats[Idx].TotalTimeSeconds" @ StoredTopScoreRaceStats[Idx].TotalTimeSeconds);
     StoredTopScoreRaceStats[Idx].FinishTimeStamp = TimeStamp();
-    `hrlog("StoredTopScoreRaceStats[Idx].FinishTimeStamp" @ StoredTopScoreRaceStats[Idx].FinishTimeStamp);
+    `hrdebug("StoredTopScoreRaceStats[Idx].PlayerName" @ StoredTopScoreRaceStats[Idx].PlayerName);
+    `hrdebug("StoredTopScoreRaceStats[Idx].PlayerUniqueId" @ StoredTopScoreRaceStats[Idx].PlayerUniqueId);
+    `hrdebug("StoredTopScoreRaceStats[Idx].VehicleClass" @ StoredTopScoreRaceStats[Idx].VehicleClass);
+    `hrdebug("StoredTopScoreRaceStats[Idx].LevelName" @ StoredTopScoreRaceStats[Idx].LevelName);
+    `hrdebug("StoredTopScoreRaceStats[Idx].LevelVersion" @ StoredTopScoreRaceStats[Idx].LevelVersion);
+    `hrdebug("StoredTopScoreRaceStats[Idx].TotalTimeSeconds" @ StoredTopScoreRaceStats[Idx].TotalTimeSeconds);
+    `hrdebug("StoredTopScoreRaceStats[Idx].FinishTimeStamp" @ StoredTopScoreRaceStats[Idx].FinishTimeStamp);
 
-    `hrlog("before sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
+    `hrdebug("before sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
     if (StoredTopScoreRaceStats.Length > 1)
     {
         StoredTopScoreRaceStats.Sort(SortDelegate_StoredRaceStats_V1);
@@ -413,7 +360,7 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
     {
         StoredTopScoreRaceStats.Length = MaxStoredTopScoreRaceStatsInConfigFile;
     }
-    `hrlog("after sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
+    `hrdebug("after sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
 
     SaveConfig();
 }
@@ -470,29 +417,6 @@ static function string RaceTimeToString(float S, float F)
     return TimeString;
 }
 
-/*
-final function string RaceDateTimeToString(const out DateTime_V1 S, const out DateTime_V1 F)
-{
-    local float TotalSecs;
-    local int Hours;
-    local int Mins;
-    local int Secs;
-    local int MSecs;
-
-    TotalSecs = ((F.Hour - S.Hour) * 3600)
-        + ((F.Min - S.Min) * 60)
-        + (F.Sec - S.Sec)
-        + ((F.MSec - S.MSec) / 1000);
-
-    Hours = TotalSecs / 3600;
-    Mins = (TotalSecs - (Hours * 3600)) / 60;
-    Secs = TotalSecs - (Hours * 3600) - (Mins * 60);
-    MSecs = Round((TotalSecs - int(TotalSecs)) * 1000000);
-
-    return Hours $ ":" $ Mins $ ":" $ Secs $ "." $ MSecs;
-}
-*/
-
 simulated function UpdateRaceStatArrays()
 {
     local int Idx;
@@ -501,7 +425,7 @@ simulated function UpdateRaceStatArrays()
     for (Idx = 0; Idx < OngoingRaceStats.Length; ++Idx)
     {
         ROV = OngoingRaceStats[Idx].Vehicle;
-        `hrlog("ROV:" @ ROV);
+        `hrdebug("ROV:" @ ROV);
         if (ROV != None)
         {
             // TODO: need to set a grace period of sorts? In case a "dead" vehicle crosses the finish line?
@@ -554,7 +478,7 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
     local int BGWidth;
     local vector2d TextSize;
 
-    // `hrlog("PC:" @ PC @ "Canvas:" @ Canvas @ "CameraPosition:" @ CameraPosition @ "CameraDir:" @ CameraDir);
+    // `hrdebug("PC:" @ PC @ "Canvas:" @ Canvas @ "CameraPosition:" @ CameraPosition @ "CameraDir:" @ CameraDir);
 
     if ((ReplicatedRaceStatsCount == 0) && (ReplicatedFinishedRaceStatsCount == 0))
     {
@@ -610,29 +534,13 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
     super.PostRenderFor(PC, Canvas, CameraPosition, CameraDir);
 }
 
-/*
-reliable client function ClientStartDrawHUD(Controller C)
-{
-    local PlayerController PC;
-
-    `hrlog("C:" @ C);
-
-    PC = PlayerController(C);
-    if (PC != None && PC.myHUD != None)
-    {
-        PC.myHUD.bShowOverlays = True;
-        PC.myHUD.AddPostRenderedActor(self);
-    }
-}
-*/
-
 simulated function DrawScoreboard()
 {
     local ROPlayerController ROPC;
 
     ForEach LocalPlayerControllers(class'ROPlayerController', ROPC)
     {
-        // `hrlog("ROPC:" @ ROPC);
+        // `hrdebug("ROPC:" @ ROPC);
 
         if (ROPC != None && ROPC.myHUD != None)
         {

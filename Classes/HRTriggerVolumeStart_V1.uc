@@ -10,19 +10,19 @@ simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocat
     local ROPawn ROP;
     local ROVehicle ROV;
 
-    // `hrlog("Other: " $ Other);
+    // `hrdebug("Other: " $ Other);
 
     Super.Touch(Other, OtherComp, HitLocation, HitNormal);
 
     if (Role != ROLE_Authority || TrackFinishTrigger == None)
     {
-        // `hrlog("Role:" @ Role);
-        // `hrlog("TrackFinishTrigger:" @ TrackFinishTrigger);
+        // `hrdebug("Role:" @ Role);
+        // `hrdebug("TrackFinishTrigger:" @ TrackFinishTrigger);
         return;
     }
 
     ROV = ROVehicle(Other);
-    // `hrlog("ROV:" @ ROV);
+    // `hrdebug("ROV:" @ ROV);
     if (ROV != none)
     {
         ROP = ROV.GetDriverForSeatIndex(0);

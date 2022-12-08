@@ -1,4 +1,19 @@
+// Comment out to disable debug logging for release builds.
+`define HRDEBUG 1
+
 `define hrlog(msg, cond, tag) \
     `log(self.class.name $ "::" $ GetFuncName() $ "(): " $ `msg, \
     `cond, \
     `if(`tag) name("HRScoreboard-" $ string(`tag)) `else 'HRScoreboard' `endif)
+
+`define hrwarn(msg, cond) `hrlog(`msg, `cond, 'WARNING')
+`define hrerror(msg, cond) `hrlog(`msg, `cond, 'ERROR')
+
+ `ifdef(HRDEBUG)
+    `define hrdebug(msg, cond, tag) \
+        `log(self.class.name $ "::" $ GetFuncName() $ "(): " $ `msg, \
+        `cond, \
+        `if(`tag) name("HRScoreboard-" $ string(`tag)) `else 'HRScoreboard' `endif)
+`else
+    `define hrdebug(msg, cond, tag)
+`endif

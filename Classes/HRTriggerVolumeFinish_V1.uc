@@ -6,7 +6,7 @@ simulated event Touch(Actor Other, PrimitiveComponent OtherComp, vector HitLocat
     local ROPawn ROP;
     local ROVehicle ROV;
 
-    // `hrlog("Other: " $ Other);
+    // `hrdebug("Other: " $ Other);
 
     Super.Touch(Other, OtherComp, HitLocation, HitNormal);
 

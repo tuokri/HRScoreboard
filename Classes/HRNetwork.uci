@@ -1,0 +1,34 @@
+struct DateTime_V1
+{
+    var int Year;
+    var int Month;
+    var int DayOfWeek;
+    var int Day;
+    var int Hour;
+    var int Min;
+    var int Sec;
+    var int MSec;
+};
+
+/*
+final function string RaceDateTimeToString(const out DateTime_V1 S, const out DateTime_V1 F)
+{
+    local float TotalSecs;
+    local int Hours;
+    local int Mins;
+    local int Secs;
+    local int MSecs;
+
+    TotalSecs = ((F.Hour - S.Hour) * 3600)
+        + ((F.Min - S.Min) * 60)
+        + (F.Sec - S.Sec)
+        + ((F.MSec - S.MSec) / 1000);
+
+    Hours = TotalSecs / 3600;
+    Mins = (TotalSecs - (Hours * 3600)) / 60;
+    Secs = TotalSecs - (Hours * 3600) - (Mins * 60);
+    MSecs = Round((TotalSecs - int(TotalSecs)) * 1000000);
+
+    return Hours $ ":" $ Mins $ ":" $ Secs $ "." $ MSecs;
+}
+*/
