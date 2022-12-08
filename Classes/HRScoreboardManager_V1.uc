@@ -69,13 +69,16 @@ var(HRScoreboard) string ChatName;
 
 // Scoreboard backend server host. Only change if you know what you are doing.
 // Default = todo.todo.com.
-var(HRScoreboard) string BackendHost;
+var(HRScoreboard) private string BackendHost;
 // Scoreboard backend server port. Only change if you know what you are doing.
 // Default = 54231.
-var(HRScoreboard) int BackendPort;
+var(HRScoreboard) private int BackendPort;
 
 // Max number of finished races to display in the HUD scoreboard.
 var(HRScoreboard) byte MaxFinishedRaces;
+
+var() private editconst HRTcpLink_V1 HRTcpLink;
+var() private editconst class<HRTcpLink_V1> HRTcpLinkClass;
 
 // Used to determine max scoreboard width.
 var() private string SizeTestString;
@@ -178,6 +181,13 @@ simulated event PostBeginPlay()
         return;
     }
 
+    if (HRTcpLink == None)
+    {
+        HRTcpLink = Spawn(HRTcpLinkClass, self);
+        HRTcpLink.SetOwner(self);
+        HRTcpLink.Configure(BackendHost, BackendPort);
+    }
+
     if (ChatRelay == None)
     {
         ChatRelay = Spawn(ChatRelayClass, self);
@@ -195,6 +205,10 @@ event Destroyed()
     if (ChatRelay != None)
     {
         ChatRelay.Destroy();
+    }
+    if (HRTcpLink != None)
+    {
+        HRTcpLink.CloseLink();
     }
     super.Destroyed();
 }
@@ -607,7 +621,7 @@ DefaultProperties
 
     ChatName="<<Scoreboard>>"
 
-    BackendHost=""
+    BackendHost="localhost"
     BackendPort=54231
 
     SizeTestString="CharacterTestNameString123 99999.99999 sec"
@@ -618,4 +632,6 @@ DefaultProperties
     MaxStoredTopScoreRaceStatsInConfigFile=250
 
     ChatRelayClass=class'HRChatRelay_V1'
+
+    HRTcpLinkClass=class'HRTcpLink_V1'
 }
