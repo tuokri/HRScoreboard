@@ -92,7 +92,7 @@ var(HRScoreboard) int BackendPort;
 var(HRScoreboard) byte MaxFinishedRaces;
 
 // Used to determine max scoreboard width.
-var() string SizeTestString;
+var() private string SizeTestString;
 
 var() private editconst class<HRChatRelay_V1> ChatRelayClass;
 var() private editconst HRChatRelay_V1 ChatRelay;
@@ -356,6 +356,9 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
     // `hrlog("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
 }
 
+// TODO: sorting long struct arrays is going to do a lot of copying.
+//   The performance of this function should be monitored even if this
+//   only gets called rarely when a player finishes the track.
 function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
 {
     local int Idx;
@@ -591,8 +594,8 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
 
     if (ReplicatedFinishedRaceStatsCount > 0)
     {
-        //              "CharacterTestNameString123 99999.99999"
-        Canvas.DrawText("--------- SESSION LEADERBOARD --------", True);
+        //              "CharacterTestNameString123 99999.99999 sec"
+        Canvas.DrawText("----------- SESSION LEADERBOARD ----------", True);
         for (Idx = 0; Idx < ReplicatedFinishedRaceStatsCount; ++Idx)
         {
             Canvas.DrawText(
@@ -658,13 +661,13 @@ simulated function TimerLoopClient()
 }
 
 // Ascending sort based on total race time.
-function int SortDelegate_StoredRaceStats_V1(const out StoredRaceStats_V1 A, const out StoredRaceStats_V1 B)
+function int SortDelegate_StoredRaceStats_V1(StoredRaceStats_V1 A, StoredRaceStats_V1 B)
 {
     return B.TotalTimeSeconds - A.TotalTimeSeconds;
 }
 
 // Ascending sort based on total race time.
-function int SortDelegate_RaceStatsComplex_V1(const out RaceStatsComplex_V1 A, const out RaceStatsComplex_V1 B)
+function int SortDelegate_RaceStatsComplex_V1(RaceStatsComplex_V1 A, RaceStatsComplex_V1 B)
 {
     return (B.RaceFinish - B.RaceStart) - (A.RaceFinish - A.RaceStart);
 }
@@ -699,7 +702,7 @@ DefaultProperties
     BackendHost=""
     BackendPort=54231
 
-    SizeTestString="CharacterTestNameString123 99999.99999"
+    SizeTestString="CharacterTestNameString123 99999.99999 sec"
 
     MinWayPointUpdateIntervalSeconds=5.0
     MaxFinishedRaces=32
