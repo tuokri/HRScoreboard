@@ -1,8 +1,14 @@
 class HRChatRelay_V1 extends Controller;
 
+simulated event PostBeginPlay()
+{
+    super.PostBeginPlay();
+    InitPlayerReplicationInfo();
+}
+
 function InitPlayerReplicationInfo()
 {
-    PlayerReplicationInfo = Spawn(WorldInfo.Game.PlayerReplicationInfoClass, self,, vect(0,0,0), rot(0,0,0));
+    PlayerReplicationInfo = Spawn(WorldInfo.Game.PlayerReplicationInfoClass, self);
     PlayerReplicationInfo.bIsInactive = True;
     PlayerReplicationInfo.PlayerName = class'HRScoreboardManager_V1'.default.ChatName;
     PlayerReplicationInfo.bIsSpectator = True;

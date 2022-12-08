@@ -51,7 +51,8 @@ struct StoredRaceStats_V1
     var DateTime_V1 FinishDateTime;
 };
 
-// Sorted top score stats array in a config file.
+// Sorted top score stats array in a config file. Not displayed in live scoreboard.
+// Only stored in the config file for archive purposes.
 var config array<StoredRaceStats_V1> StoredTopScoreRaceStats;
 
 var(HRScoreboard) int MaxStoredTopScoreRaceStatsInConfigFile<ToolTip=Max number of race stats stored in the config file.|ClampMin=1|ClampMax=1000>;
@@ -99,9 +100,9 @@ var() RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
 var() byte ReplicatedRaceStatsCount;
 var() byte ReplicatedFinishedRaceStatsCount;
 
-// Ongoing races for this session.
+// Ongoing races for this session. Displayed in HUD scoreboard.
 var() private array<RaceStatsComplex_V1> OngoingRaceStats;
-// Races finished during this session.
+// Races finished during this session. Displayed in HUD scoreboard.
 var() private array<RaceStatsComplex_V1> FinishedRaces;
 
 // Minimum interval between race waypoint updates.
@@ -109,6 +110,11 @@ var() float MinWayPointUpdateIntervalSeconds;
 
 // Just for debugging / developing.
 var PlayerReplicationInfo DebugPRI;
+
+const HUEY_NAME = "Huey";
+const COBRA_NAME = "Cobra";
+const LOACH_NAME = "Loach";
+const BUSHRANGER_NAME = "Bushranger";
 
 replication
 {
@@ -120,10 +126,30 @@ replication
 simulated event PostBeginPlay()
 {
     local HRTriggerVolume_V1 HRTV;
+    local int Idx;
+    local bool bStoredStatsModified;
 
     super.PostBeginPlay();
 
     `hrlog("WorldInfo.NetMode:" @ WorldInfo.NetMode);
+
+    MaxStoredTopScoreRaceStatsInConfigFile = Clamp(MaxStoredTopScoreRaceStatsInConfigFile, 1, 1000);
+
+    // Sanity check config file.
+    for (Idx = 0; Idx < StoredTopScoreRaceStats.Length; ++Idx)
+    {
+        if (StoredTopScoreRaceStats[Idx].PlayerUniqueId == "" || StoredTopScoreRaceStats[Idx].PlayerName == ""
+            || StoredTopScoreRaceStats[Idx].VehicleClass == "" || StoredTopScoreRaceStats[Idx].LevelName == "")
+        {
+            StoredTopScoreRaceStats.Remove(Idx--, 1);
+            bStoredStatsModified = True;
+        }
+    }
+
+    if (bStoredStatsModified)
+    {
+        SaveConfig();
+    }
 
     switch (WorldInfo.NetMode)
     {
@@ -137,7 +163,8 @@ simulated event PostBeginPlay()
             SetTimer(1.0, True, 'TimerLoopClient');
             break;
         default:
-            `hrlog("ERROR:" @ WorldInfo.NetMode @ "is not supported");
+            `hrlog("WARNING:" @ WorldInfo.NetMode @ "is not tested");
+            SetTimer(1.0, True, 'TimerLoopStandalone');
     }
 
     if (Role != ROLE_Authority)
@@ -234,6 +261,7 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
 
 function PopRaceStats(ROPawn ROP, ROVehicle ROV)
 {
+    local string Message;
     local int Idx;
     local float RaceFinish;
     local float RaceStart;
@@ -251,6 +279,7 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
         }
         else
         {
+            `hrlog("ERROR: cannot pop race stats, PRI is null");
             return;
         }
     }
@@ -289,13 +318,11 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
     RaceStart = OngoingRaceStats[Idx].RaceStart;
     OngoingRaceStats[Idx].RaceFinish = RaceFinish;
 
-    WorldInfo.Game.Broadcast(
-        ChatRelay,
-        PRI.PlayerName @ "finished in"
-            @ RaceTimeToString(RaceStart, RaceFinish)
-            @ "with" @ VehicleClassToString(OngoingRaceStats[Idx].Vehicle.Class),
-        'Say'
-    );
+    Message = PRI.PlayerName @ "finished in"
+        @ RaceTimeToString(RaceStart, RaceFinish)
+        @ "with" @ VehicleClassToString(OngoingRaceStats[Idx].Vehicle.Class);
+    `hrlog(class'OnlineSubsystem'.static.UniqueNetIdToString(PRI.UniqueId) @ Message);
+    WorldInfo.Game.Broadcast(ChatRelay, Message, 'Say');
 
     if (OngoingRaceStats[Idx].Vehicle != ROV)
     {
@@ -316,23 +343,44 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
     local DateTime_V1 FinishDateTime;
     local int Idx;
 
-    FinishedRaces[FinishedRaces.Length] = RaceStats;
-    FinishedRaces.Sort(SortDelegate_RaceStatsComplex_V1);
+    if (RaceStats.RacePRI == None)
+    {
+        `hrlog("ERROR: cannot store finished race, RacePRI is null");
+        return;
+    }
 
+    `hrlog("before sort: FinishedRaces.Length" @ FinishedRaces.Length);
+
+    FinishedRaces.AddItem(RaceStats);
+    if (FinishedRaces.Length > 1)
+    {
+        FinishedRaces.Sort(SortDelegate_RaceStatsComplex_V1);
+    }
+
+    `hrlog("after sort: FinishedRaces.Length" @ FinishedRaces.Length);
     if (FinishedRaces.Length > MaxFinishedRaces)
     {
         FinishedRaces.Length = MaxFinishedRaces;
     }
 
-    Idx = StoredTopScoreRaceStats.Length + 1;
-    StoredTopScoreRaceStats.Length = Idx;
+    Idx = StoredTopScoreRaceStats.Length;
+    StoredTopScoreRaceStats.Length = Idx + 1;
+
+    `hrlog("Idx:" @ Idx);
+    `hrlog("StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
 
     StoredTopScoreRaceStats[Idx].PlayerName = RaceStats.RacePRI.PlayerName;
+    `hrlog("StoredTopScoreRaceStats[Idx].PlayerName" @ StoredTopScoreRaceStats[Idx].PlayerName);
     StoredTopScoreRaceStats[Idx].PlayerUniqueId = class'OnlineSubsystem'.static.UniqueNetIdToString(RaceStats.RacePRI.UniqueId);
+    `hrlog("StoredTopScoreRaceStats[Idx].PlayerUniqueId" @ StoredTopScoreRaceStats[Idx].PlayerUniqueId);
     StoredTopScoreRaceStats[Idx].VehicleClass = string(RaceStats.Vehicle.Class);
+    `hrlog("StoredTopScoreRaceStats[Idx].VehicleClass" @ StoredTopScoreRaceStats[Idx].VehicleClass);
     StoredTopScoreRaceStats[Idx].LevelName = WorldInfo.GetMapName(True);
+    `hrlog("StoredTopScoreRaceStats[Idx].LevelName" @ StoredTopScoreRaceStats[Idx].LevelName);
     StoredTopScoreRaceStats[Idx].LevelVersion = LevelVersion;
+    `hrlog("StoredTopScoreRaceStats[Idx].LevelVersion" @ StoredTopScoreRaceStats[Idx].LevelVersion);
     StoredTopScoreRaceStats[Idx].TotalTimeSeconds = RaceStats.RaceFinish - RaceStats.RaceStart;
+    `hrlog("StoredTopScoreRaceStats[Idx].TotalTimeSeconds" @ StoredTopScoreRaceStats[Idx].TotalTimeSeconds);
     GetSystemTime(
         FinishDateTime.Year,
         FinishDateTime.Month,
@@ -345,12 +393,16 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
     );
     StoredTopScoreRaceStats[Idx].FinishDateTime = FinishDateTime;
 
-    StoredTopScoreRaceStats.Sort(SortDelegate_StoredRaceStats_V1);
-
+    `hrlog("before sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
+    if (StoredTopScoreRaceStats.Length > 1)
+    {
+        StoredTopScoreRaceStats.Sort(SortDelegate_StoredRaceStats_V1);
+    }
     if (StoredTopScoreRaceStats.Length > MaxStoredTopScoreRaceStatsInConfigFile)
     {
         StoredTopScoreRaceStats.Length = MaxStoredTopScoreRaceStatsInConfigFile;
     }
+    `hrlog("after sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
 
     SaveConfig();
 }
@@ -360,13 +412,13 @@ static function string VehicleClassToString(class<ROVehicle> VehicleClass)
     switch (VehicleClass)
     {
         case class'ROHeli_UH1H_Content':
-            return "Huey";
+            return HUEY_NAME;
         case class'ROHeli_OH6_Content':
-            return "Loach";
+            return LOACH_NAME;
         case class'ROHeli_AH1G_Content':
-            return "Cobra";
+            return COBRA_NAME;
         case class'ROHeli_UH1H_Gunship_Content':
-            return "Bushranger";
+            return BUSHRANGER_NAME;
         default:
             return string(VehicleClass);
     }
@@ -444,6 +496,7 @@ simulated function UpdateRaceStatArrays()
             // TODO: need to set a grace period of sorts? In case a "dead" vehicle crosses the finish line?
             if(ROV.IsPendingKill() || ROV.bDeadVehicle)
             {
+                // Store death location (or closest last known location);
                 OngoingRaceStats[Idx].LastWayPointUpdateTime = WorldInfo.RealTimeSeconds;
                 OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
                 OngoingRaceStats[Idx].Vehicle = None;
@@ -482,6 +535,7 @@ simulated function UpdateRaceStatArrays()
     ReplicatedFinishedRaceStatsCount = FinishedRaces.Length;
 }
 
+// TODO: add clipping regions and text alignment/justification.
 simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
 {
     local int Idx;
@@ -496,11 +550,10 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         return;
     }
 
-
     Canvas.Font = ScoreboardFont;
     Canvas.TextSize(SizeTestString, TextSize.X, TextSize.Y);
     BGHeight = (TextSize.Y * (ReplicatedRaceStatsCount + ReplicatedFinishedRaceStatsCount)) + 10;
-    BGWidth = TextSize.X + 5;
+    BGWidth = TextSize.X + 8;
 
     // 1 more row for separator.
     if (ReplicatedFinishedRaceStatsCount > 0)
@@ -521,7 +574,8 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         {
             Canvas.DrawText(
                 ReplicatedRaceStats[Idx].RacePRI.PlayerName
-                    @ WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart,
+                    @ (WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart)
+                    @ "sec",
                 True
             );
         }
@@ -534,8 +588,9 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         for (Idx = 0; Idx < ReplicatedFinishedRaceStatsCount; ++Idx)
         {
             Canvas.DrawText(
-                Idx $ "." @ ReplicatedFinishedRaces[Idx].RacePRI.PlayerName
-                    @ ReplicatedFinishedRaces[Idx].RaceFinish - ReplicatedFinishedRaces[Idx].RaceStart,
+                Idx $ ".:" @ ReplicatedFinishedRaces[Idx].RacePRI.PlayerName
+                    @ (ReplicatedFinishedRaces[Idx].RaceFinish - ReplicatedFinishedRaces[Idx].RaceStart)
+                    @ "sec",
                 True
             );
         }
@@ -629,7 +684,7 @@ DefaultProperties
     ScoreboardFontRenderInfo=(bClipText=True, bEnableShadow=True)
     ScoreboardBGTex=Texture2D'VN_UI_Textures.HUD.GameMode.UI_GM_Bar_Fill'
     ScoreboardBGBorder=Texture2D'VN_UI_Textures.HUD.GameMode.UI_GM_Bar_Frame'
-    ScoreboardBGTint=(R=0.5, G=0.5, B=0.5, A=0.5)
+    ScoreboardBGTint=(R=0.5,G=0.5,B=0.5,A=0.5)
 
     ChatName="<<Scoreboard>>"
 
