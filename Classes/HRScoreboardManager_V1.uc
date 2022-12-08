@@ -3,6 +3,7 @@ class HRScoreboardManager_V1 extends Actor
     placeable
     config(HRScoreboardManager_V1);
 
+/*
 struct DateTime_V1
 {
     var int Year;
@@ -14,6 +15,7 @@ struct DateTime_V1
     var int Sec;
     var int MSec;
 };
+*/
 
 // Race stats base struct. All values replicated.
 struct RaceStats_V1
@@ -22,10 +24,6 @@ struct RaceStats_V1
     var ROVehicle Vehicle;
     var float RaceStart;
     var float RaceFinish;
-
-    // TODO: is this even needed?
-    // var DateTime_V1 RaceStart;
-    // var DateTime_V1 RaceFinish;
 };
 
 // Non-replicated race statistics.
@@ -39,6 +37,11 @@ struct RaceStatsComplex_V1 extends RaceStats_V1
     var float LastWayPointUpdateTime;
 };
 
+// Increment whenever StoredRaceStats_V1 is updated.
+const CURRENT_CONFIG_VERSION = 1;
+// Internal config version.
+var() private config int ConfigVersion;
+
 // Race stats stored in a config file.
 struct StoredRaceStats_V1
 {
@@ -48,7 +51,7 @@ struct StoredRaceStats_V1
     var string LevelName;
     var int LevelVersion;
     var float TotalTimeSeconds;
-    var DateTime_V1 FinishDateTime;
+    var string FinishTimeStamp;
 };
 
 // Sorted top score stats array in a config file. Not displayed in live scoreboard.
@@ -123,23 +126,27 @@ replication
         ReplicatedFinishedRaceStatsCount;
 }
 
-simulated event PostBeginPlay()
+simulated function SanityCheckConfig()
 {
-    local HRTriggerVolume_V1 HRTV;
     local int Idx;
     local bool bStoredStatsModified;
 
-    super.PostBeginPlay();
-
-    `hrlog("WorldInfo.NetMode:" @ WorldInfo.NetMode);
-
     MaxStoredTopScoreRaceStatsInConfigFile = Clamp(MaxStoredTopScoreRaceStatsInConfigFile, 1, 1000);
 
-    // Sanity check config file.
+    if (ConfigVersion != CURRENT_CONFIG_VERSION)
+    {
+        `hrlog("WARNING: config version changed" @ "(" $ ConfigVersion
+            @ "->" @ CURRENT_CONFIG_VERSION $ ")" @ "-- wiping all stored stats!");
+        ConfigVersion = CURRENT_CONFIG_VERSION;
+        StoredTopScoreRaceStats.Length = 0;
+        bStoredStatsModified = True;
+    }
+
     for (Idx = 0; Idx < StoredTopScoreRaceStats.Length; ++Idx)
     {
         if (StoredTopScoreRaceStats[Idx].PlayerUniqueId == "" || StoredTopScoreRaceStats[Idx].PlayerName == ""
-            || StoredTopScoreRaceStats[Idx].VehicleClass == "" || StoredTopScoreRaceStats[Idx].LevelName == "")
+            || StoredTopScoreRaceStats[Idx].VehicleClass == "" || StoredTopScoreRaceStats[Idx].LevelName == ""
+            || StoredTopScoreRaceStats[Idx].FinishTimeStamp == "")
         {
             StoredTopScoreRaceStats.Remove(Idx--, 1);
             bStoredStatsModified = True;
@@ -150,6 +157,17 @@ simulated event PostBeginPlay()
     {
         SaveConfig();
     }
+}
+
+simulated event PostBeginPlay()
+{
+    local HRTriggerVolume_V1 HRTV;
+
+    super.PostBeginPlay();
+
+    SanityCheckConfig();
+
+    `hrlog("WorldInfo.NetMode:" @ WorldInfo.NetMode);
 
     switch (WorldInfo.NetMode)
     {
@@ -340,7 +358,6 @@ function PopRaceStats(ROPawn ROP, ROVehicle ROV)
 
 function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
 {
-    local DateTime_V1 FinishDateTime;
     local int Idx;
 
     if (RaceStats.RacePRI == None)
@@ -381,17 +398,8 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
     `hrlog("StoredTopScoreRaceStats[Idx].LevelVersion" @ StoredTopScoreRaceStats[Idx].LevelVersion);
     StoredTopScoreRaceStats[Idx].TotalTimeSeconds = RaceStats.RaceFinish - RaceStats.RaceStart;
     `hrlog("StoredTopScoreRaceStats[Idx].TotalTimeSeconds" @ StoredTopScoreRaceStats[Idx].TotalTimeSeconds);
-    GetSystemTime(
-        FinishDateTime.Year,
-        FinishDateTime.Month,
-        FinishDateTime.DayOfWeek,
-        FinishDateTime.Day,
-        FinishDateTime.Hour,
-        FinishDateTime.Min,
-        FinishDateTime.Sec,
-        FinishDateTime.MSec
-    );
-    StoredTopScoreRaceStats[Idx].FinishDateTime = FinishDateTime;
+    StoredTopScoreRaceStats[Idx].FinishTimeStamp = TimeStamp();
+    `hrlog("StoredTopScoreRaceStats[Idx].FinishTimeStamp" @ StoredTopScoreRaceStats[Idx].FinishTimeStamp);
 
     `hrlog("before sort: StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
     if (StoredTopScoreRaceStats.Length > 1)

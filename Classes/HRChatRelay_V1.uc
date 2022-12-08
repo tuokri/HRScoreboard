@@ -17,6 +17,16 @@ function InitPlayerReplicationInfo()
     PlayerReplicationInfo.bWaitingPlayer = False;
 }
 
+event PlayerTick( float DeltaTime )
+{
+	// This is needed because PlayerControllers with no actual player attached
+	// will leak during seamless traveling.
+	if (WorldInfo.NextURL != "" || WorldInfo.IsInSeamlessTravel())
+	{
+		Destroy();
+	}
+}
+
 DefaultProperties
 {
     bIsPlayer=False
