@@ -10,6 +10,11 @@ struct RaceStats_V1
     var ROVehicle Vehicle;
     var float RaceStart;
     var float RaceFinish;
+
+    // Caching these here so they are still available after
+    // the player disconnects or the vehicle is gone.
+    var string PlayerName;
+    var string VehicleClassName;
 };
 
 // Non-replicated race statistics.
@@ -23,10 +28,12 @@ struct RaceStatsComplex_V1 extends RaceStats_V1
     var float LastWayPointUpdateTime;
 };
 
+var private int MaxWaypoints;
+
 // Increment whenever StoredRaceStats_V1 is updated.
 const CURRENT_CONFIG_VERSION = 1;
 // Internal config version.
-var() private config int ConfigVersion;
+var() private editconst config int ConfigVersion;
 
 // Race stats stored in a config file.
 struct StoredRaceStats_V1
@@ -41,56 +48,58 @@ struct StoredRaceStats_V1
 };
 
 // Sorted top score stats array in a config file. Not displayed in live scoreboard.
-// Only stored in the config file for archive purposes.
+// Only stored in the config file for archive purposes. Config filename is
+// 'ROHRScoreboardManager_V1.ini'.
 var config array<StoredRaceStats_V1> StoredTopScoreRaceStats;
 
-var(HRScoreboard) int MaxStoredTopScoreRaceStatsInConfigFile<ToolTip=Max number of race stats stored in the config file.|ClampMin=1|ClampMax=1000>;
+var(HRScoreboard) int MaxStoredTopScoreRaceStatsInConfigFile<ToolTip=Max number of race stats stored in the local config file.|ClampMin=1|ClampMax=1000>;
 
 // Level version number. Increase this number whenever the race
 // track is changed to distinguish between race scores recorded
 // on different versions of the track.
 var(HRScoreboard) int LevelVersion;
 
-// The font to draw the HUD scoreboard with.
-var(HRScoreboard) Font ScoreboardFont;
-// Scoreboard background texture. Stretched to fit.
-var(HRScoreboard) Texture2D ScoreboardBGTex;
-// Scoreboard background border texture. Stretched to fit.
-var(HRScoreboard) Texture2D ScoreboardBGBorder;
-// Scoreboard background texture tint;
-var(HRScoreboard) LinearColor ScoreboardBGTint;
-// Scoreboard text color.
-var(HRScoreboard) Color ScoreboardTextColor;
-// Scoreboard text render settings.
-var(HRScoreboard) FontRenderInfo ScoreboardFontRenderInfo;
-
 // The name scoreboard manager uses when posting chat messages.
 var(HRScoreboard) string ChatName;
 
+// The font to draw the HUD scoreboard with.
+var(HRScoreboardHUD) Font ScoreboardFont;
+// Scoreboard background texture. Stretched to fit.
+var(HRScoreboardHUD) Texture2D ScoreboardBGTex;
+// Scoreboard background border texture. Stretched to fit.
+var(HRScoreboardHUD) Texture2D ScoreboardBGBorder;
+// Scoreboard background texture tint;
+var(HRScoreboardHUD) LinearColor ScoreboardBGTint;
+// Scoreboard text color.
+var(HRScoreboardHUD) Color ScoreboardTextColor;
+// Scoreboard text render settings.
+var(HRScoreboardHUD) FontRenderInfo ScoreboardFontRenderInfo;
+// Used to determine max scoreboard width. Only change if you know what you are doing.
+var(HRScoreboardHUD) private string SizeTestString;
+// Max number of finished races to display in the HUD scoreboard.
+var(HRScoreboardHUD) byte MaxFinishedRaces;
+
 // Scoreboard backend server host. Only change if you know what you are doing.
 // Default = todo.todo.com.
-var(HRScoreboard) private string BackendHost;
+var(HRScoreboardBackend) private string BackendHost;
 // Scoreboard backend server port. Only change if you know what you are doing.
 // Default = 54231.
-var(HRScoreboard) private int BackendPort;
+var(HRScoreboardBackend) private int BackendPort;
+// Is connection to backend statistics server enabled?
+// Only change if you know what you are doing. Default = True.
+var(HRScoreboardBackend) private bool bBackendConnectionEnabled;
 
-// Max number of finished races to display in the HUD scoreboard.
-var(HRScoreboard) byte MaxFinishedRaces;
-
-var() private editconst HRTcpLink_V1 HRTcpLink;
-var() private editconst class<HRTcpLink_V1> HRTcpLinkClass;
-
-// Used to determine max scoreboard width.
-var() private string SizeTestString;
+var(HRScoreboardBackend) private editconst HRTcpLink_V1 HRTcpLink;
+var(HRScoreboardBackend) private editconst class<HRTcpLink_V1> HRTcpLinkClass;
 
 var() private editconst class<HRChatRelay_V1> ChatRelayClass;
 var() private editconst HRChatRelay_V1 ChatRelay;
 
 const MAX_REPLICATED = 255;
-var() RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
-var() RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
-var() byte ReplicatedRaceStatsCount;
-var() byte ReplicatedFinishedRaceStatsCount;
+var() private editconst RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
+var() private editconst RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
+var() private editconst byte ReplicatedRaceStatsCount;
+var() private editconst byte ReplicatedFinishedRaceStatsCount;
 
 // Ongoing races for this session. Displayed in HUD scoreboard.
 var() private array<RaceStatsComplex_V1> OngoingRaceStats;
@@ -181,7 +190,7 @@ simulated event PostBeginPlay()
         return;
     }
 
-    if (HRTcpLink == None)
+    if (bBackendConnectionEnabled && HRTcpLink == None)
     {
         HRTcpLink = Spawn(HRTcpLinkClass, self);
         HRTcpLink.SetOwner(self);
@@ -202,14 +211,22 @@ simulated event PostBeginPlay()
 
 event Destroyed()
 {
+    if (bBackendConnectionEnabled)
+    {
+        WorldInfo.Game.Broadcast(ChatRelay,
+            "visit" @ BackendHost @ "to see the online scoreboard", 'Say');
+    }
+
     if (ChatRelay != None)
     {
         ChatRelay.Destroy();
     }
+
     if (HRTcpLink != None)
     {
         HRTcpLink.CloseLink();
     }
+
     super.Destroyed();
 }
 
@@ -254,6 +271,8 @@ function PushRaceStats(ROPawn ROP, ROVehicle ROV)
     NewStats.RaceStart = WorldInfo.RealTimeSeconds;
     NewStats.WayPoints.AddItem(ROV.Location);
     NewStats.LastWayPointUpdateTime = NewStats.RaceStart;
+    NewStats.VehicleClassName = VehicleClassToString(ROV.Class);
+    NewStats.PlayerName = PRI.PlayerName;
 
     OngoingRaceStats.AddItem(NewStats);
     // `hrdebug("OngoingRaceStats.Length: " $ OngoingRaceStats.Length);
@@ -332,6 +351,11 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
 
     `hrdebug("before sort: FinishedRaces.Length" @ FinishedRaces.Length);
 
+    if (HRTcpLink != None && bBackendConnectionEnabled)
+    {
+        HRTcpLink.SendFinishedRaceStats(RaceStats);
+    }
+
     FinishedRaces.AddItem(RaceStats);
     if (FinishedRaces.Length > 1)
     {
@@ -350,9 +374,9 @@ function StoreFinishedRace(RaceStatsComplex_V1 RaceStats)
     `hrdebug("Idx:" @ Idx);
     `hrdebug("StoredTopScoreRaceStats.Length:" @ StoredTopScoreRaceStats.Length);
 
-    StoredTopScoreRaceStats[Idx].PlayerName = RaceStats.RacePRI.PlayerName;
+    StoredTopScoreRaceStats[Idx].PlayerName = RaceStats.PlayerName;
     StoredTopScoreRaceStats[Idx].PlayerUniqueId = class'OnlineSubsystem'.static.UniqueNetIdToString(RaceStats.RacePRI.UniqueId);
-    StoredTopScoreRaceStats[Idx].VehicleClass = string(RaceStats.Vehicle.Class);
+    StoredTopScoreRaceStats[Idx].VehicleClass = RaceStats.VehicleClassName;
     StoredTopScoreRaceStats[Idx].LevelName = WorldInfo.GetMapName(True);
     StoredTopScoreRaceStats[Idx].LevelVersion = LevelVersion;
     StoredTopScoreRaceStats[Idx].TotalTimeSeconds = RaceStats.RaceFinish - RaceStats.RaceStart;
@@ -463,6 +487,8 @@ simulated function UpdateRaceStatArrays()
             ReplicatedRaceStats[Idx].RacePRI = OngoingRaceStats[Idx].RacePRI;
             ReplicatedRaceStats[Idx].Vehicle = OngoingRaceStats[Idx].Vehicle;
             ReplicatedRaceStats[Idx].RaceStart = OngoingRaceStats[Idx].RaceStart;
+            ReplicatedRaceStats[Idx].PlayerName = OngoingRaceStats[Idx].PlayerName;
+            ReplicatedRaceStats[Idx].VehicleClassName = OngoingRaceStats[Idx].VehicleClassName;
         }
         else
         {
@@ -479,6 +505,8 @@ simulated function UpdateRaceStatArrays()
         ReplicatedFinishedRaces[Idx].Vehicle = FinishedRaces[Idx].Vehicle;
         ReplicatedFinishedRaces[Idx].RaceStart = FinishedRaces[Idx].RaceStart;
         ReplicatedFinishedRaces[Idx].RaceFinish = FinishedRaces[Idx].RaceFinish;
+        ReplicatedFinishedRaces[Idx].PlayerName = FinishedRaces[Idx].PlayerName;
+        ReplicatedFinishedRaces[Idx].VehicleClassName = FinishedRaces[Idx].VehicleClassName;
     }
 
     ReplicatedFinishedRaceStatsCount = FinishedRaces.Length;
@@ -502,7 +530,7 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
     Canvas.Font = ScoreboardFont;
     Canvas.TextSize(SizeTestString, TextSize.X, TextSize.Y);
     BGHeight = (TextSize.Y * (ReplicatedRaceStatsCount + ReplicatedFinishedRaceStatsCount)) + 10;
-    BGWidth = TextSize.X + 8;
+    BGWidth = TextSize.X + 10;
 
     // 1 more row for separator.
     if (ReplicatedFinishedRaceStatsCount > 0)
@@ -510,9 +538,11 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         BGHeight += TextSize.Y;
     }
 
-    Canvas.SetPos(Canvas.SizeX - ((Canvas.SizeX / 6) + BGWidth), (Canvas.SizeY / 6));
-    Canvas.DrawTileStretched(ScoreboardBGTex, BGWidth, BGHeight, 0, 0, BGWidth, BGHeight, ScoreboardBGTint);
-    Canvas.DrawTileStretched(ScoreboardBGBorder, BGWidth, BGHeight, 0, 0, BGWidth, BGHeight, ScoreboardBGTint);
+    Canvas.SetPos(Canvas.SizeX - ((Canvas.SizeX / 7) + BGWidth), (Canvas.SizeY / 7));
+    Canvas.DrawTileStretched(ScoreboardBGTex, BGWidth, BGHeight, 0, 0,
+        ScoreboardBGTex.SizeX, ScoreboardBGTex.SizeY, ScoreboardBGTint, True, True);
+    Canvas.DrawTileStretched(ScoreboardBGBorder, BGWidth, BGHeight, 0, 0,
+        ScoreboardBGBorder.SizeX, ScoreboardBGBorder.SizeY, ScoreboardBGTint, True, True);
 
     Canvas.SetPos(Canvas.CurX + 5, Canvas.CurY + 5);
     Canvas.SetDrawColorStruct(ScoreboardTextColor);
@@ -522,7 +552,7 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         if ((ReplicatedRaceStats[Idx].RacePRI != None) && (ReplicatedRaceStats[Idx].Vehicle != None))
         {
             Canvas.DrawText(
-                ReplicatedRaceStats[Idx].RacePRI.PlayerName
+                ReplicatedRaceStats[Idx].PlayerName
                     @ (WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart)
                     @ "sec",
                 True
@@ -537,9 +567,9 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         for (Idx = 0; Idx < ReplicatedFinishedRaceStatsCount; ++Idx)
         {
             Canvas.DrawText(
-                Idx $ ".:" @ ReplicatedFinishedRaces[Idx].RacePRI.PlayerName
+                Idx $ "." @ ReplicatedFinishedRaces[Idx].PlayerName
                     @ (ReplicatedFinishedRaces[Idx].RaceFinish - ReplicatedFinishedRaces[Idx].RaceStart)
-                    @ "sec",
+                    @ "sec" @ ReplicatedFinishedRaces[Idx].VehicleClassName,
                 True
             );
         }
@@ -623,15 +653,17 @@ DefaultProperties
 
     BackendHost="localhost"
     BackendPort=54231
+    bBackendConnectionEnabled=True
 
     SizeTestString="CharacterTestNameString123 99999.99999 sec"
 
     MinWayPointUpdateIntervalSeconds=5.0
     MaxFinishedRaces=32
 
-    MaxStoredTopScoreRaceStatsInConfigFile=250
+    MaxStoredTopScoreRaceStatsInConfigFile=50
 
     ChatRelayClass=class'HRChatRelay_V1'
-
     HRTcpLinkClass=class'HRTcpLink_V1'
+
+    MaxWaypoints=100
 }

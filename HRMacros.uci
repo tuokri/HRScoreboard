@@ -10,10 +10,7 @@
 `define hrerror(msg, cond) `hrlog(`msg, `cond, 'ERROR')
 
  `ifdef(HRDEBUG)
-    `define hrdebug(msg, cond, tag) \
-        `log(self.class.name $ "::" $ GetFuncName() $ "(): " $ `msg, \
-        `cond, \
-        `if(`tag) name("HRScoreboard-" $ string(`tag)) `else 'HRScoreboard' `endif)
+    `define hrdebug(msg, cond) `hrlog(`msg, `cond, 'DEBUG')
 `else
     `define hrdebug(msg, cond, tag)
 `endif
