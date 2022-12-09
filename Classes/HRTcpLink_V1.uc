@@ -14,8 +14,10 @@ enum EPacketID
 };
 
 const HEADER_BYTES = 3;
+
 struct HRPacket_V1
 {
+    // TODO: 4-byte field for size + sequence number?
     var byte Size;
     var byte ProtocolVersion;
     var byte PacketID;
@@ -124,7 +126,7 @@ final private function float GetTimeout()
 
 final private function float GetRetryDelay()
 {
-    return FClamp(2.0 ** RetryCount, 2.0, 16.0);
+    return FClamp(2.0 ** RetryCount, 2.0, 30.0);
 }
 
 final private function CheckResolveStatus()

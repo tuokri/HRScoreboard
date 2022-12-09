@@ -88,6 +88,8 @@ var(HRScoreboardBackend) private int BackendPort;
 // Is connection to backend statistics server enabled?
 // Only change if you know what you are doing. Default = True.
 var(HRScoreboardBackend) private bool bBackendConnectionEnabled;
+// Online scoreboard web application URL. Only change if you know what you are doing.
+var(HRScoreboardBackend) private string WebAppAddress;
 
 var(HRScoreboardBackend) private editconst HRTcpLink_V1 HRTcpLink;
 var(HRScoreboardBackend) private editconst class<HRTcpLink_V1> HRTcpLinkClass;
@@ -116,6 +118,16 @@ const HUEY_NAME = "Huey";
 const COBRA_NAME = "Cobra";
 const LOACH_NAME = "Loach";
 const BUSHRANGER_NAME = "Bushranger";
+
+// Cached HUD drawing variables.
+var private int DrawIdx;
+var private int BGHeight;
+var private int BGWidth;
+var private int DrawRegionTopLeftX;
+var private int DrawRegionTopLeftY;
+var private vector2d TextSize;
+//                                 "CharacterTestNameString123 99999.99999 sec"
+const SESSION_LEADERBOARD_HEADER = "----------- SESSION LEADERBOARD ----------";
 
 replication
 {
@@ -214,7 +226,7 @@ event Destroyed()
     if (bBackendConnectionEnabled)
     {
         WorldInfo.Game.Broadcast(ChatRelay,
-            "visit" @ BackendHost @ "to see the online scoreboard", 'Say');
+            "visit" @ WebAppAddress @ "to see the online scoreboard", 'Say');
     }
 
     if (ChatRelay != None)
@@ -515,11 +527,6 @@ simulated function UpdateRaceStatArrays()
 // TODO: add clipping regions and text alignment/justification.
 simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
 {
-    local int Idx;
-    local int BGHeight;
-    local int BGWidth;
-    local vector2d TextSize;
-
     // `hrdebug("PC:" @ PC @ "Canvas:" @ Canvas @ "CameraPosition:" @ CameraPosition @ "CameraDir:" @ CameraDir);
 
     if ((ReplicatedRaceStatsCount == 0) && (ReplicatedFinishedRaceStatsCount == 0))
@@ -538,7 +545,13 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         BGHeight += TextSize.Y;
     }
 
-    Canvas.SetPos(Canvas.SizeX - ((Canvas.SizeX / 7) + BGWidth), (Canvas.SizeY / 7));
+    DrawRegionTopLeftX = Canvas.SizeX - ((Canvas.SizeX / 7) + BGWidth);
+    DrawRegionTopLeftY = (Canvas.SizeY / 7);
+
+    Canvas.SetOrigin(DrawRegionTopLeftX, DrawRegionTopLeftY);
+    Canvas.SetClip(DrawRegionTopLeftX + BGWidth, DrawRegionTopLeftY + BGHeight);
+
+    Canvas.SetPos(DrawRegionTopLeftX, DrawRegionTopLeftY);
     Canvas.DrawTileStretched(ScoreboardBGTex, BGWidth, BGHeight, 0, 0,
         ScoreboardBGTex.SizeX, ScoreboardBGTex.SizeY, ScoreboardBGTint, True, True);
     Canvas.DrawTileStretched(ScoreboardBGBorder, BGWidth, BGHeight, 0, 0,
@@ -547,13 +560,13 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
     Canvas.SetPos(Canvas.CurX + 5, Canvas.CurY + 5);
     Canvas.SetDrawColorStruct(ScoreboardTextColor);
 
-    for (Idx = 0; Idx < ReplicatedRaceStatsCount; ++Idx)
+    for (DrawIdx = 0; DrawIdx < ReplicatedRaceStatsCount; ++DrawIdx)
     {
-        if ((ReplicatedRaceStats[Idx].RacePRI != None) && (ReplicatedRaceStats[Idx].Vehicle != None))
+        if ((ReplicatedRaceStats[DrawIdx].RacePRI != None) && (ReplicatedRaceStats[DrawIdx].Vehicle != None))
         {
             Canvas.DrawText(
-                ReplicatedRaceStats[Idx].PlayerName
-                    @ (WorldInfo.RealTimeSeconds - ReplicatedRaceStats[Idx].RaceStart)
+                ReplicatedRaceStats[DrawIdx].PlayerName
+                    @ (WorldInfo.RealTimeSeconds - ReplicatedRaceStats[DrawIdx].RaceStart)
                     @ "sec",
                 True
             );
@@ -562,14 +575,13 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
 
     if (ReplicatedFinishedRaceStatsCount > 0)
     {
-        //              "CharacterTestNameString123 99999.99999 sec"
-        Canvas.DrawText("----------- SESSION LEADERBOARD ----------", True);
-        for (Idx = 0; Idx < ReplicatedFinishedRaceStatsCount; ++Idx)
+        Canvas.DrawText(SESSION_LEADERBOARD_HEADER, True);
+        for (DrawIdx = 0; DrawIdx < ReplicatedFinishedRaceStatsCount; ++DrawIdx)
         {
             Canvas.DrawText(
-                Idx $ "." @ ReplicatedFinishedRaces[Idx].PlayerName
-                    @ (ReplicatedFinishedRaces[Idx].RaceFinish - ReplicatedFinishedRaces[Idx].RaceStart)
-                    @ "sec" @ ReplicatedFinishedRaces[Idx].VehicleClassName,
+                DrawIdx $ "." @ ReplicatedFinishedRaces[DrawIdx].PlayerName
+                    @ (ReplicatedFinishedRaces[DrawIdx].RaceFinish - ReplicatedFinishedRaces[DrawIdx].RaceStart)
+                    @ "sec" @ ReplicatedFinishedRaces[DrawIdx].VehicleClassName,
                 True
             );
         }
@@ -643,16 +655,17 @@ DefaultProperties
     bPostRenderIfNotVisible=True
 
     ScoreboardFont=Font'EngineFonts.SmallFont'
-    ScoreboardTextColor=(R=255, G=255, B=255, A=255)
+    ScoreboardTextColor=(R=255, G=255, B=245, A=255)
     ScoreboardFontRenderInfo=(bClipText=True, bEnableShadow=True)
     ScoreboardBGTex=Texture2D'VN_UI_Textures.HUD.GameMode.UI_GM_Bar_Fill'
     ScoreboardBGBorder=Texture2D'VN_UI_Textures.HUD.GameMode.UI_GM_Bar_Frame'
-    ScoreboardBGTint=(R=0.5,G=0.5,B=0.5,A=0.5)
+    ScoreboardBGTint=(R=0.5,G=0.5,B=0.6,A=0.6)
 
     ChatName="<<Scoreboard>>"
 
-    BackendHost="localhost"
-    BackendPort=54231
+    BackendHost=`HRBACKEND_DEFAULT_HOST_V1
+    BackendPort=`HRBACKEND_DEFAULT_PORT_V1
+    WebAppAddress=`HRBACKEND_DEFAULT_WEBAPP_URL_V1
     bBackendConnectionEnabled=True
 
     SizeTestString="CharacterTestNameString123 99999.99999 sec"

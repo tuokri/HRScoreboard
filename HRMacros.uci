@@ -1,6 +1,10 @@
 // Comment out to disable debug logging for release builds.
 `define HRDEBUG 1
 
+`define HRBACKEND_DEFAULT_HOST_V1 "localhost"
+`define HRBACKEND_DEFAULT_PORT_V1 54231
+`define HRBACKEND_DEFAULT_WEBAPP_URL_V1 "todo.todo.com"
+
 `define hrlog(msg, cond, tag) \
     `log(self.class.name $ "::" $ GetFuncName() $ "(): " $ `msg, \
     `cond, \
@@ -9,7 +13,7 @@
 `define hrwarn(msg, cond) `hrlog(`msg, `cond, 'WARNING')
 `define hrerror(msg, cond) `hrlog(`msg, `cond, 'ERROR')
 
- `ifdef(HRDEBUG)
+`ifdef(HRDEBUG)
     `define hrdebug(msg, cond) `hrlog(`msg, `cond, 'DEBUG')
 `else
     `define hrdebug(msg, cond, tag)
