@@ -548,8 +548,9 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
     DrawRegionTopLeftX = Canvas.SizeX - ((Canvas.SizeX / 7) + BGWidth);
     DrawRegionTopLeftY = (Canvas.SizeY / 7);
 
-    Canvas.SetOrigin(DrawRegionTopLeftX, DrawRegionTopLeftY);
-    Canvas.SetClip(DrawRegionTopLeftX + BGWidth, DrawRegionTopLeftY + BGHeight);
+    // TODO: breaks everything else.
+    // Canvas.SetOrigin(DrawRegionTopLeftX, DrawRegionTopLeftY);
+    // Canvas.SetClip(DrawRegionTopLeftX + BGWidth, DrawRegionTopLeftY + BGHeight);
 
     Canvas.SetPos(DrawRegionTopLeftX, DrawRegionTopLeftY);
     Canvas.DrawTileStretched(ScoreboardBGTex, BGWidth, BGHeight, 0, 0,
