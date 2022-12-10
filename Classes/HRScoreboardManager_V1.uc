@@ -492,7 +492,11 @@ simulated function UpdateRaceStatArrays()
                     OngoingRaceStats[Idx].LastWayPointUpdateTime + MinWayPointUpdateIntervalSeconds))
                 {
                     OngoingRaceStats[Idx].LastWayPointUpdateTime = WorldInfo.RealTimeSeconds;
-                    OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
+                    if (OngoingRaceStats[Idx].WayPoints.Length <= MaxWaypoints)
+                    {
+                        OngoingRaceStats[Idx].WayPoints.AddItem(ROV.Location);
+                        // TODO: better logic to decide which waypoints to drop if we are maxed out?
+                    }
                 }
             }
 
