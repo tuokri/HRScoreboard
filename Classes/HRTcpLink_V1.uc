@@ -17,7 +17,7 @@ const HEADER_BYTES = 3;
 
 struct HRPacket_V1
 {
-    // TODO: 4-byte field for size + sequence number?
+    // TODO: 4-byte field for size + sequence number? CRC32?
     var byte Size;
     var byte ProtocolVersion;
     var byte PacketID;
@@ -49,7 +49,8 @@ var private int DataBufferSize;
 final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
 {
     local HRPacket_V1 Packet;
-    local float Test;
+    local int Test1;
+    local int Test2;
 
     if (SendQueue.Length >= MaxSendQueueLength)
     {
@@ -64,19 +65,28 @@ final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
     Packet.Data[1] = RaceStats.RacePRI.UniqueId.Uid.B;
     `hrlog("RaceStats.RaceFinish:" @ RaceStats.RaceFinish);
     Packet.Data[2] = (
-          ((RaceStats.RaceFinish >> 24) & 0xff)
-        | ((RaceStats.RaceFinish >> 16) & 0xff)
+          ((RaceStats.RaceFinish      ) & 0xff)
         | ((RaceStats.RaceFinish >>  8) & 0xff)
-        | ((RaceStats.RaceFinish      ) & 0xff)
-    );
-    Test = (
-          ((RaceStats.RaceFinish >> 24) & 0xff)
         | ((RaceStats.RaceFinish >> 16) & 0xff)
-        | ((RaceStats.RaceFinish >>  8) & 0xff)
-        | ((RaceStats.RaceFinish      ) & 0xff)
+        | ((RaceStats.RaceFinish >> 24) & 0xff)
     );
-    `hrlog("Test:" @ Test);
     `hrlog("Packet.Data[2]:" @ Packet.Data[2]);
+
+    // This does not work.
+    // Test = (
+    //       ((RaceStats.RaceFinish      ) & 0xff)
+    //     | ((RaceStats.RaceFinish >>  8) & 0xff)
+    //     | ((RaceStats.RaceFinish >> 16) & 0xff)
+    //     | ((RaceStats.RaceFinish >> 24) & 0xff)
+    // );
+
+    // Have to send floats as 2 ints?
+    // 99999.666666 -> 99999 + 666666
+    Test1 = RaceStats.RaceFinish;
+    Test2 = Round((RaceStats.RaceFinish - int(RaceStats.RaceFinish)) * 1000000);
+    `hrlog("Test1:" @ Test1);
+    `hrlog("Test2:" @ Test2);
+
     Packet.Data[3] = 0x4040404; // PKCS#7.
 
     // - vehicle class/name
@@ -95,11 +105,11 @@ final private function UniqueNetIdToBytes(const out UniqueNetId UniqueId,
     out byte Buffer[255], optional byte StartIndex = 0)
 {
     Buffer[StartIndex++] = (UniqueId.Uid.A      ) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >> 8 ) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.A >>  8) & 0xff;
     Buffer[StartIndex++] = (UniqueId.Uid.A >> 16) & 0xff;
     Buffer[StartIndex++] = (UniqueId.Uid.A >> 24) & 0xff;
     Buffer[StartIndex++] = (UniqueId.Uid.B      ) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >> 8 ) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.B >>  8) & 0xff;
     Buffer[StartIndex++] = (UniqueId.Uid.B >> 16) & 0xff;
     Buffer[StartIndex++] = (UniqueId.Uid.B >> 24) & 0xff;
 }
@@ -247,26 +257,26 @@ final private function PerformIO()
     `hrlog("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
 
     // 64-bit unique ID.
-    SendBuffer[ 3] = (DataBuffer[0] >> 24) & 0xff;
-    SendBuffer[ 4] = (DataBuffer[0] >> 16) & 0xff;
-    SendBuffer[ 5] = (DataBuffer[0] >>  8) & 0xff;
-    SendBuffer[ 6] = (DataBuffer[0]      ) & 0xff;
-    SendBuffer[ 7] = (DataBuffer[1] >> 24) & 0xff;
-    SendBuffer[ 8] = (DataBuffer[1] >> 16) & 0xff;
-    SendBuffer[ 9] = (DataBuffer[1] >>  8) & 0xff;
-    SendBuffer[10] = (DataBuffer[1]      ) & 0xff;
+    SendBuffer[ 3] = (DataBuffer[0]      ) & 0xff;
+    SendBuffer[ 4] = (DataBuffer[0] >>  8) & 0xff;
+    SendBuffer[ 5] = (DataBuffer[0] >> 16) & 0xff;
+    SendBuffer[ 6] = (DataBuffer[0] >> 24) & 0xff;
+    SendBuffer[ 7] = (DataBuffer[1]      ) & 0xff;
+    SendBuffer[ 8] = (DataBuffer[1] >>  8) & 0xff;
+    SendBuffer[ 9] = (DataBuffer[1] >> 16) & 0xff;
+    SendBuffer[10] = (DataBuffer[1] >> 24) & 0xff;
 
     // 32-bit float.
-    SendBuffer[11] = (DataBuffer[2] >> 24) & 0xff;
-    SendBuffer[12] = (DataBuffer[2] >> 16) & 0xff;
-    SendBuffer[13] = (DataBuffer[2] >>  8) & 0xff;
-    SendBuffer[14] = (DataBuffer[2]      ) & 0xff;
+    SendBuffer[11] = (DataBuffer[2]      ) & 0xff;
+    SendBuffer[12] = (DataBuffer[2] >>  8) & 0xff;
+    SendBuffer[13] = (DataBuffer[2] >> 16) & 0xff;
+    SendBuffer[14] = (DataBuffer[2] >> 24) & 0xff;
 
     // PKCS#7.
-    SendBuffer[16] = (DataBuffer[3] >> 24) & 0xff;
-    SendBuffer[17] = (DataBuffer[3] >> 16) & 0xff;
-    SendBuffer[18] = (DataBuffer[3] >>  8) & 0xff;
-    SendBuffer[19] = (DataBuffer[3]      ) & 0xff;
+    SendBuffer[16] = (DataBuffer[3]      ) & 0xff;
+    SendBuffer[17] = (DataBuffer[3] >>  8) & 0xff;
+    SendBuffer[18] = (DataBuffer[3] >> 16) & 0xff;
+    SendBuffer[19] = (DataBuffer[3] >> 24) & 0xff;
 
     SendBinary(SendBufferSize, SendBuffer);
     SendQueue.Remove(0, 1);

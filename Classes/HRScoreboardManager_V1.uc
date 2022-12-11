@@ -528,7 +528,6 @@ simulated function UpdateRaceStatArrays()
     ReplicatedFinishedRaceStatsCount = FinishedRaces.Length;
 }
 
-// TODO: add clipping regions and text alignment/justification.
 simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
 {
     // `hrdebug("PC:" @ PC @ "Canvas:" @ Canvas @ "CameraPosition:" @ CameraPosition @ "CameraDir:" @ CameraDir);
@@ -599,15 +598,12 @@ simulated function DrawScoreboard()
 {
     local ROPlayerController ROPC;
 
-    ForEach LocalPlayerControllers(class'ROPlayerController', ROPC)
+    ROPC = ROPlayerController(GetALocalPlayerController());
+    `hrdebug("ROPC:" @ ROPC);
+    if (ROPC != None && ROPC.myHUD != None)
     {
-        // `hrdebug("ROPC:" @ ROPC);
-
-        if (ROPC != None && ROPC.myHUD != None)
-        {
-            ROPC.myHUD.bShowOverlays = True;
-            ROPC.myHUD.AddPostRenderedActor(self);
-        }
+        ROPC.myHUD.bShowOverlays = True;
+        ROPC.myHUD.AddPostRenderedActor(self);
     }
 }
 

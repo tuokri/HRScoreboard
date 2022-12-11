@@ -23,9 +23,38 @@ event PlayerTick( float DeltaTime )
     // will leak during seamless traveling.
     if (WorldInfo.NextURL != "" || WorldInfo.IsInSeamlessTravel())
     {
+        `hrdebug(self @ "destroying self due to seamless travel");
         Destroy();
     }
 }
+
+// `ifdef(HRDEBUG)
+// simulated exec function SendBackendDebugMessage()
+// {
+//     local RaceStatsComplex_V1 RaceStats;
+//     local ROVehicle ROV;
+//     local HRTcpLink_V1 Link;
+
+//     `hrdebug("sending TCP test message");
+
+//     ForEach AllActors(class'ROVehicle', ROV)
+//     {
+//         break;
+//     }
+
+//     RaceStats.RacePRI = GetALocalPlayerController().PlayerReplicationInfo;
+//     RaceStats.Vehicle = ROV;
+//     RaceStats.RaceStart = FRand() * Rand(100);
+//     RaceStats.RaceFinish = RaceStats.RaceStart + WorldInfo.RealTimeSeconds;
+//     RaceStats.PlayerName = "TestPlayer";
+//     RaceStats.VehicleClassName = "Loach";
+
+//     ForEach AllActors(class'HRTcpLink_V1', Link)
+//     {
+//         Link.SendFinishedRaceStats(RaceStats);
+//     }
+// }
+// `endif
 
 DefaultProperties
 {
