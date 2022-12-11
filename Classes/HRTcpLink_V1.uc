@@ -226,6 +226,8 @@ final private function PerformIO()
     // 2. Convert into byte array.
     // 3. Send binary.
 
+    local int Idx;
+
     if (SendQueue.Length == 0)
     {
         return;
@@ -245,16 +247,24 @@ final private function PerformIO()
     DataBuffer[3] = SendQueue[0].Data[3];
 
     `hrlog("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
+    `hrlog("DataBuffer[0]:" @ DataBuffer[0]);
     `hrlog("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
+    `hrlog("DataBuffer[1]:" @ DataBuffer[1]);
     `hrlog("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
+    `hrlog("DataBuffer[2]:" @ DataBuffer[2]);
     `hrlog("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
+    `hrlog("DataBuffer[3]:" @ DataBuffer[3]);
 
     XXTEA_Encrypt(DataBuffer, DataBufferSize);
 
     `hrlog("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
+    `hrlog("DataBuffer[0]:" @ DataBuffer[0]);
     `hrlog("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
+    `hrlog("DataBuffer[1]:" @ DataBuffer[1]);
     `hrlog("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
+    `hrlog("DataBuffer[2]:" @ DataBuffer[2]);
     `hrlog("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
+    `hrlog("DataBuffer[3]:" @ DataBuffer[3]);
 
     // 64-bit unique ID.
     SendBuffer[ 3] = (DataBuffer[0]      ) & 0xff;
@@ -277,6 +287,11 @@ final private function PerformIO()
     SendBuffer[17] = (DataBuffer[3] >>  8) & 0xff;
     SendBuffer[18] = (DataBuffer[3] >> 16) & 0xff;
     SendBuffer[19] = (DataBuffer[3] >> 24) & 0xff;
+
+    for (Idx = 0; Idx < SendBufferSize; ++Idx)
+    {
+        `hrdebug(Idx @ ":" @ SendBuffer[Idx]);
+    }
 
     SendBinary(SendBufferSize, SendBuffer);
     SendQueue.Remove(0, 1);

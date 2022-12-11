@@ -583,7 +583,7 @@ simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraP
         for (DrawIdx = 0; DrawIdx < ReplicatedFinishedRaceStatsCount; ++DrawIdx)
         {
             Canvas.DrawText(
-                DrawIdx $ "." @ ReplicatedFinishedRaces[DrawIdx].PlayerName
+                DrawIdx + 1 $ "." @ ReplicatedFinishedRaces[DrawIdx].PlayerName
                     @ (ReplicatedFinishedRaces[DrawIdx].RaceFinish - ReplicatedFinishedRaces[DrawIdx].RaceStart)
                     @ "sec" @ ReplicatedFinishedRaces[DrawIdx].VehicleClassName,
                 True
