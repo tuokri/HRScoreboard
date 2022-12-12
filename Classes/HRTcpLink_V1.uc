@@ -3,9 +3,8 @@ class HRTcpLink_V1 extends TcpLink;
 `define HR_PROTO_VERSION 1
 
 var private int XXTEAKey[4];
-`define MX (((Z>>5^Y<<2) + (Y>>3^Z<<4)) ^ ((Sum^Y) + (XXTEAKey[(P&3)^E] ^ Z)))
-// const DELTA = 0x9e3779b9;
-const DELTA = 0x243f6a88;
+`define MX (((Z>>>5^Y<<2) + (Y>>>3^Z<<4)) ^ ((Sum^Y) + (XXTEAKey[(P&3)^E] ^ Z)))
+const DELTA = 0x9e3779b9;
 
 enum EPacketID
 {
@@ -46,6 +45,14 @@ var private byte SendBufferSize;
 var private int DataBuffer[31];
 var private int DataBufferSize;
 
+event PostBeginPlay()
+{
+    super.PostBeginPlay();
+
+    LinkMode = MODE_Binary;
+    ReceiveMode = RMODE_Event;
+}
+
 final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
 {
     local HRPacket_V1 Packet;
@@ -57,35 +64,37 @@ final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
         `hrerror("MaxSendQueueLength reached, dropping packet");
     }
 
+    // Header.
     Packet.Size = 19;
     Packet.ProtocolVersion = ProtocolVersion;
     Packet.PacketID = EPID_FinishedRaceStats;
 
+    // Payload data.
     Packet.Data[0] = RaceStats.RacePRI.UniqueId.Uid.A;
     Packet.Data[1] = RaceStats.RacePRI.UniqueId.Uid.B;
-    `hrlog("RaceStats.RaceFinish:" @ RaceStats.RaceFinish);
+    `hrdebug("RaceStats.RaceFinish:" @ RaceStats.RaceFinish);
     Packet.Data[2] = (
-          ((RaceStats.RaceFinish      ) & 0xff)
-        | ((RaceStats.RaceFinish >>  8) & 0xff)
-        | ((RaceStats.RaceFinish >> 16) & 0xff)
-        | ((RaceStats.RaceFinish >> 24) & 0xff)
+          ((RaceStats.RaceFinish       ) & 0xff)
+        | ((RaceStats.RaceFinish >>>  8) & 0xff)
+        | ((RaceStats.RaceFinish >>> 16) & 0xff)
+        | ((RaceStats.RaceFinish >>> 24) & 0xff)
     );
-    `hrlog("Packet.Data[2]:" @ Packet.Data[2]);
+    `hrdebug("Packet.Data[2]:" @ Packet.Data[2]);
 
     // This does not work.
     // Test = (
-    //       ((RaceStats.RaceFinish      ) & 0xff)
-    //     | ((RaceStats.RaceFinish >>  8) & 0xff)
-    //     | ((RaceStats.RaceFinish >> 16) & 0xff)
-    //     | ((RaceStats.RaceFinish >> 24) & 0xff)
+    //       ((RaceStats.RaceFinish       ) & 0xff)
+    //     | ((RaceStats.RaceFinish >>>  8) & 0xff)
+    //     | ((RaceStats.RaceFinish >>> 16) & 0xff)
+    //     | ((RaceStats.RaceFinish >>> 24) & 0xff)
     // );
 
     // Have to send floats as 2 ints?
     // 99999.666666 -> 99999 + 666666
     Test1 = RaceStats.RaceFinish;
     Test2 = Round((RaceStats.RaceFinish - int(RaceStats.RaceFinish)) * 1000000);
-    `hrlog("Test1:" @ Test1);
-    `hrlog("Test2:" @ Test2);
+    `hrdebug("Test1:" @ Test1);
+    `hrdebug("Test2:" @ Test2);
 
     Packet.Data[3] = 0x4040404; // PKCS#7.
 
@@ -104,14 +113,14 @@ final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
 final private function UniqueNetIdToBytes(const out UniqueNetId UniqueId,
     out byte Buffer[255], optional byte StartIndex = 0)
 {
-    Buffer[StartIndex++] = (UniqueId.Uid.A      ) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >>  8) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >> 16) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >> 24) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B      ) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >>  8) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >> 16) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >> 24) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.A       ) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.A >>>  8) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.A >>> 16) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.A >>> 24) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.B       ) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.B >>>  8) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.B >>> 16) & 0xff;
+    Buffer[StartIndex++] = (UniqueId.Uid.B >>> 24) & 0xff;
 }
 
 final function Configure(string ServerHost, int ServerPort)
@@ -131,7 +140,7 @@ final function Configure(string ServerHost, int ServerPort)
 
 final private function float GetTimeout()
 {
-    return FClamp(2.0 + (RetryCount / 10), 2.0, 4.0);
+    return FClamp(1.0 + (RetryCount / 10), 1.0, 4.0);
 }
 
 final private function float GetRetryDelay()
@@ -163,7 +172,7 @@ final private function Retry()
         Error = GetLastError();
         if (Error != 0)
         {
-            `hrlog("last WinSock error was:" @ WinSockErrorToString(Error));
+            `hrwarn("last WinSock error was:" @ WinSockErrorToString(Error));
         }
         ++RetryCount;
         SetTimer(GetRetryDelay() + GetTimeout(), False, 'CheckResolveStatus');
@@ -174,15 +183,28 @@ final private function Retry()
 final function CloseLink()
 {
     bRetryOnFail = False;
+    SendBinary(0, SendBuffer);
     Close();
 }
 
 event Resolved(IpAddr Addr)
 {
+    local int LocalPort;
+
     `hrlog(BackendHost @ "resolved to:" @ IpAddrToString(Addr));
 
     Addr.Port = BackendPort;
-    BindPort();
+
+    LocalPort = BindPort();
+    if (LocalPort > 0)
+    {
+        `hrlog("bound on local port:" @ LocalPort);
+    }
+    else
+    {
+        `hrlog("failed to bind local port");
+        Retry();
+    }
 
     `hrlog("attempting to open connection to:" @ IpAddrToString(Addr));
     if (!Open(Addr))
@@ -220,6 +242,11 @@ event Tick(float DeltaTime)
     }
 }
 
+event ReceivedBinary(int Count, byte B[255])
+{
+    `hrdebug("Count:" @ Count);
+}
+
 final private function PerformIO()
 {
     // 1. Pick item from queue.
@@ -246,47 +273,47 @@ final private function PerformIO()
     DataBuffer[2] = SendQueue[0].Data[2];
     DataBuffer[3] = SendQueue[0].Data[3];
 
-    `hrlog("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
-    `hrlog("DataBuffer[0]:" @ DataBuffer[0]);
-    `hrlog("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
-    `hrlog("DataBuffer[1]:" @ DataBuffer[1]);
-    `hrlog("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
-    `hrlog("DataBuffer[2]:" @ DataBuffer[2]);
-    `hrlog("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
-    `hrlog("DataBuffer[3]:" @ DataBuffer[3]);
+    `hrdebug("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
+    `hrdebug("DataBuffer[0]:" @ DataBuffer[0]);
+    `hrdebug("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
+    `hrdebug("DataBuffer[1]:" @ DataBuffer[1]);
+    `hrdebug("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
+    `hrdebug("DataBuffer[2]:" @ DataBuffer[2]);
+    `hrdebug("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
+    `hrdebug("DataBuffer[3]:" @ DataBuffer[3]);
 
     XXTEA_Encrypt(DataBuffer, DataBufferSize);
 
-    `hrlog("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
-    `hrlog("DataBuffer[0]:" @ DataBuffer[0]);
-    `hrlog("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
-    `hrlog("DataBuffer[1]:" @ DataBuffer[1]);
-    `hrlog("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
-    `hrlog("DataBuffer[2]:" @ DataBuffer[2]);
-    `hrlog("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
-    `hrlog("DataBuffer[3]:" @ DataBuffer[3]);
+    `hrdebug("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
+    `hrdebug("DataBuffer[0]:" @ DataBuffer[0]);
+    `hrdebug("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
+    `hrdebug("DataBuffer[1]:" @ DataBuffer[1]);
+    `hrdebug("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
+    `hrdebug("DataBuffer[2]:" @ DataBuffer[2]);
+    `hrdebug("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
+    `hrdebug("DataBuffer[3]:" @ DataBuffer[3]);
 
     // 64-bit unique ID.
-    SendBuffer[ 3] = (DataBuffer[0]      ) & 0xff;
-    SendBuffer[ 4] = (DataBuffer[0] >>  8) & 0xff;
-    SendBuffer[ 5] = (DataBuffer[0] >> 16) & 0xff;
-    SendBuffer[ 6] = (DataBuffer[0] >> 24) & 0xff;
-    SendBuffer[ 7] = (DataBuffer[1]      ) & 0xff;
-    SendBuffer[ 8] = (DataBuffer[1] >>  8) & 0xff;
-    SendBuffer[ 9] = (DataBuffer[1] >> 16) & 0xff;
-    SendBuffer[10] = (DataBuffer[1] >> 24) & 0xff;
+    SendBuffer[ 3] = (DataBuffer[0]       ) & 0xff;
+    SendBuffer[ 4] = (DataBuffer[0] >>>  8) & 0xff;
+    SendBuffer[ 5] = (DataBuffer[0] >>> 16) & 0xff;
+    SendBuffer[ 6] = (DataBuffer[0] >>> 24) & 0xff;
+    SendBuffer[ 7] = (DataBuffer[1]       ) & 0xff;
+    SendBuffer[ 8] = (DataBuffer[1] >>>  8) & 0xff;
+    SendBuffer[ 9] = (DataBuffer[1] >>> 16) & 0xff;
+    SendBuffer[10] = (DataBuffer[1] >>> 24) & 0xff;
 
     // 32-bit float.
-    SendBuffer[11] = (DataBuffer[2]      ) & 0xff;
-    SendBuffer[12] = (DataBuffer[2] >>  8) & 0xff;
-    SendBuffer[13] = (DataBuffer[2] >> 16) & 0xff;
-    SendBuffer[14] = (DataBuffer[2] >> 24) & 0xff;
+    SendBuffer[11] = (DataBuffer[2]       ) & 0xff;
+    SendBuffer[12] = (DataBuffer[2] >>>  8) & 0xff;
+    SendBuffer[13] = (DataBuffer[2] >>> 16) & 0xff;
+    SendBuffer[14] = (DataBuffer[2] >>> 24) & 0xff;
 
     // PKCS#7.
-    SendBuffer[16] = (DataBuffer[3]      ) & 0xff;
-    SendBuffer[17] = (DataBuffer[3] >>  8) & 0xff;
-    SendBuffer[18] = (DataBuffer[3] >> 16) & 0xff;
-    SendBuffer[19] = (DataBuffer[3] >> 24) & 0xff;
+    SendBuffer[15] = (DataBuffer[3]       ) & 0xff;
+    SendBuffer[16] = (DataBuffer[3] >>>  8) & 0xff;
+    SendBuffer[17] = (DataBuffer[3] >>> 16) & 0xff;
+    SendBuffer[18] = (DataBuffer[3] >>> 24) & 0xff;
 
     for (Idx = 0; Idx < SendBufferSize; ++Idx)
     {
@@ -294,7 +321,92 @@ final private function PerformIO()
     }
 
     SendBinary(SendBufferSize, SendBuffer);
+
+    `hrdebug("decrypting...");
+    XXTEA_Decrypt(DataBuffer, DataBufferSize);
+
+    `hrdebug("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
+    `hrdebug("DataBuffer[0]:" @ DataBuffer[0]);
+    `hrdebug("DataBuffer[1]:" @ ToHex(DataBuffer[1]));
+    `hrdebug("DataBuffer[1]:" @ DataBuffer[1]);
+    `hrdebug("DataBuffer[2]:" @ ToHex(DataBuffer[2]));
+    `hrdebug("DataBuffer[2]:" @ DataBuffer[2]);
+    `hrdebug("DataBuffer[3]:" @ ToHex(DataBuffer[3]));
+    `hrdebug("DataBuffer[3]:" @ DataBuffer[3]);
+
     SendQueue.Remove(0, 1);
+}
+
+// final private function int MXDebug(int Z, int Y, int Sum, int E, int P)
+// {
+//     local int a, b, c, d, ee, f, g;
+
+//     a = (z >>> 5 ^ y << 2);
+//     `hrdebug("a :" @ ToHex(a));
+//     b = (y >>> 3 ^ z << 4);
+//     `hrdebug("b :" @ ToHex(a));
+//     c = a + b;
+//     `hrdebug("c :" @ ToHex(c));
+
+//     d = (sum ^ y);
+//     `hrdebug("d :" @ ToHex(d));
+//     ee = (XXTEAKey[(p & 3) ^ e] ^ z);
+//     `hrdebug("ee:" @ ToHex(ee));
+//     f = d + ee;
+//     `hrdebug("f :" @ ToHex(f));
+
+//     g = c ^ f;
+//     `hrdebug("g :" @ ToHex(g));
+
+//     return g;
+// }
+
+final private function XXTEA_Decrypt(out int Data[31], int DataSize)
+{
+    local int Y;
+    local int Z;
+    local int Sum;
+    local int P;
+    local int Rounds;
+    local int E;
+
+    Rounds = 6 + 52 / DataSize;
+
+    if (DataSize > 1)
+    {
+        Sum = Rounds * DELTA;
+        Y = Data[0];
+
+        while (Rounds-- > 0)
+        {
+            E = (Sum >>> 2) & 3;
+
+            `hrdebug("Rounds :" @ Rounds);
+            `hrdebug("Sum    :" @ ToHex(Sum));
+            `hrdebug("E      :" @ ToHex(E));
+
+            for (P = DataSize - 1; P > 0; --P)
+            {
+                Z = Data[P - 1];
+                Y = Data[P] -= `MX;
+
+                // `hrdebug(ToHex(MXDebug(Z, Y, Sum, E, P)));
+
+                `hrdebug("P       :" @ P);
+                `hrdebug("Y       :" @ ToHex(Y));
+                `hrdebug("Z       :" @ ToHex(Z));
+                `hrdebug("Data[P] :" @ ToHex(Data[P]));
+            }
+
+            Z = Data[DataSize - 1];
+            Y = Data[0] -= `MX;
+            Sum -= DELTA;
+
+            `hrdebug("Data[DataSize - 1] :" @ ToHex(Data[DataSize - 1]));
+            `hrdebug("Y                  :" @ ToHex(Y));
+            `hrdebug("Z                  :" @ ToHex(Z));
+        }
+    }
 }
 
 final private function XXTEA_Encrypt(out int Data[31], int DataSize)
@@ -315,7 +427,7 @@ final private function XXTEA_Encrypt(out int Data[31], int DataSize)
     while (Rounds-- > 0)
     {
         Sum += DELTA;
-        E = (Sum >> 2) & 3;
+        E = (Sum >>> 2) & 3;
 
         `hrdebug("Rounds :" @ Rounds);
         `hrdebug("Sum    :" @ ToHex(Sum));
@@ -542,11 +654,16 @@ final private function string WinSockErrorToString(int Error)
 DefaultProperties
 {
     TickGroup=TG_DuringAsyncWork
+
     LinkMode=MODE_Binary
+    ReceiveMode=RMODE_Event
+
     ProtocolVersion=`HR_PROTO_VERSION
     MaxSendQueueLength=1000
+
     bRetryOnFail=True
     bConfigured=False
+
     XXTEAKey(0)=0x2b959f13
     XXTEAKey(1)=0x330de56a
     XXTEAKey(2)=0x583e0f76

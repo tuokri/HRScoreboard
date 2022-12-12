@@ -97,7 +97,7 @@ var(HRScoreboardBackend) private editconst class<HRTcpLink_V1> HRTcpLinkClass;
 var() private editconst class<HRChatRelay_V1> ChatRelayClass;
 var() private editconst HRChatRelay_V1 ChatRelay;
 
-const MAX_REPLICATED = 255;
+const MAX_REPLICATED = 128;
 var() private editconst RaceStats_V1 ReplicatedRaceStats[MAX_REPLICATED];
 var() private editconst RaceStats_V1 ReplicatedFinishedRaces[MAX_REPLICATED];
 var() private editconst byte ReplicatedRaceStatsCount;
