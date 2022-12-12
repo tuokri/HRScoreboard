@@ -1,18 +1,45 @@
 class HRTcpLink_V1 extends TcpLink;
 
-`define HR_PROTO_VERSION 1
+var private HRSha1_V1 Sha1Hasher;
 
+// XXTEA constants and macros.
 var private int XXTEAKey[4];
 `define MX (((Z>>>5^Y<<2) + (Y>>>3^Z<<4)) ^ ((Sum^Y) + (XXTEAKey[(P&3)^E] ^ Z)))
 const DELTA = 0x9e3779b9;
 
+// Diffie-Hellman key generation.
+const DH_P = 0x71d0d8bf;
+const DH_G = 7;
+var private int DH_PrivateKey[4];
+var private int DH_PublicKey[4];
+var private int DH_PeerPublicKey[4];
+
+var private bool bDHReady;
+
+var enum DHLocalState
+{
+    DHLS_None,
+    DHLS_KeyPairGenerated,
+    DHLS_PublicKeySent,
+    DHLS_SharedSecretGenerated
+} DH_LocalState;
+
+var enum DHRemoteState
+{
+    DHRS_None,
+    DHRS_PublicKeyReceived
+} DH_RemoteState;
+
 enum EPacketID
 {
-    EPID_Reserved,
+    EPID_Empty,
+    EPID_DH_PublicKey,
     EPID_FinishedRaceStats,
 };
 
+`define HR_PROTO_VERSION 1
 const HEADER_BYTES = 3;
+const DH_PUBLIC_KEY_BYTES = 19;
 
 struct HRPacket_V1
 {
@@ -49,8 +76,18 @@ event PostBeginPlay()
 {
     super.PostBeginPlay();
 
+    DH_LocalState = DHLS_None;
+    DH_RemoteState = DHRS_None;
+
+    if (Sha1Hasher == None)
+    {
+        Sha1Hasher = new(self) class'HRSha1_V1';
+    }
+
     LinkMode = MODE_Binary;
     ReceiveMode = RMODE_Event;
+
+    SetTimer(FClamp(FRand() * 15.0, 5.0, 15.0), False, 'DH_Generate_KeyPair');
 }
 
 final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
@@ -110,19 +147,6 @@ final function SendFinishedRaceStats(const out RaceStatsComplex_V1 RaceStats)
     SendQueue.AddItem(Packet);
 }
 
-final private function UniqueNetIdToBytes(const out UniqueNetId UniqueId,
-    out byte Buffer[255], optional byte StartIndex = 0)
-{
-    Buffer[StartIndex++] = (UniqueId.Uid.A       ) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >>>  8) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >>> 16) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.A >>> 24) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B       ) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >>>  8) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >>> 16) & 0xff;
-    Buffer[StartIndex++] = (UniqueId.Uid.B >>> 24) & 0xff;
-}
-
 final function Configure(string ServerHost, int ServerPort)
 {
     BackendHost = ServerHost;
@@ -172,7 +196,7 @@ final private function Retry()
         Error = GetLastError();
         if (Error != 0)
         {
-            `hrwarn("last WinSock error was:" @ WinSockErrorToString(Error));
+            `hrwarn("last WinSock error was:" @ class'HRNetUtils_V1'.static.WinSockErrorToString(Error));
         }
         ++RetryCount;
         SetTimer(GetRetryDelay() + GetTimeout(), False, 'CheckResolveStatus');
@@ -236,6 +260,45 @@ event Tick(float DeltaTime)
 {
     super.Tick(DeltaTime);
 
+    // TODO: DH timeouts?
+    // 1. send my public key
+    // 2. wait for remote public key
+    // 3. generate shared secret
+    // 4. handshake messages?
+    // 5. begin normal IO
+
+    if (!bDHReady)
+    {
+        switch (DH_LocalState)
+        {
+            case DHLS_None:
+            case DHLS_KeyPairGenerated:
+                DH_Send_PublicKey();
+            case DHLS_PublicKeySent:
+                if (DH_RemoteState == DHRS_PublicKeyReceived)
+                {
+                    DH_Generate_SharedSecret();
+                }
+                break;
+            case DHLS_SharedSecretGenerated:
+                break;
+        }
+
+        // switch (DH_RemoteState)
+        // {
+        //     case DHRS_None:
+        //         break;
+        //     case DHRS_PublicKeyReceived:
+        //         break;
+        // }
+
+        bDHReady = (DH_LocalState == DHLS_SharedSecretGenerated)
+            && (DH_RemoteState == DHRS_PublicKeyReceived);
+
+        // Check DH state again on next tick.
+        return;
+    }
+
     if (bConfigured && IsConnected())
     {
         PerformIO();
@@ -244,15 +307,91 @@ event Tick(float DeltaTime)
 
 event ReceivedBinary(int Count, byte B[255])
 {
+    local int Idx;
+    local byte Size;
+    local byte PacketProtoVersion;
+    local EPacketID PacketID;
+
     `hrdebug("Count:" @ Count);
+
+    for (Idx = 0; Idx < Count; ++Idx)
+    {
+        `hrdebug(Idx @ ":" @ B[Idx]);
+    }
+
+    if (Count > 0)
+    {
+        Size = B[0];
+    }
+    else
+    {
+        return;
+    }
+
+    if (Size >= HEADER_BYTES)
+    {
+        PacketProtoVersion = B[1];
+        PacketID = EPacketID(B[2]);
+    }
+    else
+    {
+        return;
+    }
+
+    if (PacketProtoVersion != ProtocolVersion)
+    {
+        `hrwarn("received invalid packet protocol version:" @ PacketProtoVersion);
+        return;
+    }
+
+    switch (PacketID)
+    {
+        case EPID_DH_PublicKey:
+            HandleRecv_EPID_DH_PublicKey(Size, B);
+            break;
+        default:
+            `hrwarn("received invalid packet ID:" @ PacketID);
+    }
+}
+
+final private function HandleRecv_EPID_DH_PublicKey(byte PacketSize, const out byte B[255])
+{
+    if (PacketSize < DH_PUBLIC_KEY_BYTES)
+    {
+        `hrwarn("did not receive enough bytes");
+        return;
+    }
+
+    DH_PeerPublicKey[0] = (
+           (B[ 3]        & 0xff)
+        | ((B[ 4] <<  8) & 0xff)
+        | ((B[ 5] << 16) & 0xff)
+        | ((B[ 6] << 24) & 0xff)
+    );
+    DH_PeerPublicKey[1] = (
+           (B[ 7]        & 0xff)
+        | ((B[ 8] <<  8) & 0xff)
+        | ((B[ 9] << 16) & 0xff)
+        | ((B[10] << 24) & 0xff)
+    );
+    DH_PeerPublicKey[2] = (
+           (B[11]        & 0xff)
+        | ((B[12] <<  8) & 0xff)
+        | ((B[13] << 16) & 0xff)
+        | ((B[14] << 24) & 0xff)
+    );
+    DH_PeerPublicKey[3] = (
+           (B[15]        & 0xff)
+        | ((B[16] <<  8) & 0xff)
+        | ((B[17] << 16) & 0xff)
+        | ((B[18] << 24) & 0xff)
+    );
+
+    DH_RemoteState = DHRS_PublicKeyReceived;
 }
 
 final private function PerformIO()
 {
-    // 1. Pick item from queue.
-    // 2. Convert into byte array.
-    // 3. Send binary.
-
     local int Idx;
 
     if (SendQueue.Length == 0)
@@ -322,7 +461,7 @@ final private function PerformIO()
 
     SendBinary(SendBufferSize, SendBuffer);
 
-    `hrdebug("decrypting...");
+    // `hrdebug("decrypting...");
     XXTEA_Decrypt(DataBuffer, DataBufferSize);
 
     `hrdebug("DataBuffer[0]:" @ ToHex(DataBuffer[0]));
@@ -381,9 +520,9 @@ final private function XXTEA_Decrypt(out int Data[31], int DataSize)
         {
             E = (Sum >>> 2) & 3;
 
-            `hrdebug("Rounds :" @ Rounds);
-            `hrdebug("Sum    :" @ ToHex(Sum));
-            `hrdebug("E      :" @ ToHex(E));
+            // `hrdebug("Rounds :" @ Rounds);
+            // `hrdebug("Sum    :" @ ToHex(Sum));
+            // `hrdebug("E      :" @ ToHex(E));
 
             for (P = DataSize - 1; P > 0; --P)
             {
@@ -392,19 +531,19 @@ final private function XXTEA_Decrypt(out int Data[31], int DataSize)
 
                 // `hrdebug(ToHex(MXDebug(Z, Y, Sum, E, P)));
 
-                `hrdebug("P       :" @ P);
-                `hrdebug("Y       :" @ ToHex(Y));
-                `hrdebug("Z       :" @ ToHex(Z));
-                `hrdebug("Data[P] :" @ ToHex(Data[P]));
+                // `hrdebug("P       :" @ P);
+                // `hrdebug("Y       :" @ ToHex(Y));
+                // `hrdebug("Z       :" @ ToHex(Z));
+                // `hrdebug("Data[P] :" @ ToHex(Data[P]));
             }
 
             Z = Data[DataSize - 1];
             Y = Data[0] -= `MX;
             Sum -= DELTA;
 
-            `hrdebug("Data[DataSize - 1] :" @ ToHex(Data[DataSize - 1]));
-            `hrdebug("Y                  :" @ ToHex(Y));
-            `hrdebug("Z                  :" @ ToHex(Z));
+            // `hrdebug("Data[DataSize - 1] :" @ ToHex(Data[DataSize - 1]));
+            // `hrdebug("Y                  :" @ ToHex(Y));
+            // `hrdebug("Z                  :" @ ToHex(Z));
         }
     }
 }
@@ -418,7 +557,7 @@ final private function XXTEA_Encrypt(out int Data[31], int DataSize)
     local int Rounds;
     local int E;
 
-    `hrdebug("DELTA :" @ DELTA);
+    // `hrdebug("DELTA :" @ DELTA);
 
     Rounds = 6 + 52 / DataSize;
     Sum = 0;
@@ -429,226 +568,216 @@ final private function XXTEA_Encrypt(out int Data[31], int DataSize)
         Sum += DELTA;
         E = (Sum >>> 2) & 3;
 
-        `hrdebug("Rounds :" @ Rounds);
-        `hrdebug("Sum    :" @ ToHex(Sum));
-        `hrdebug("E      :" @ ToHex(E));
+        // `hrdebug("Rounds :" @ Rounds);
+        // `hrdebug("Sum    :" @ ToHex(Sum));
+        // `hrdebug("E      :" @ ToHex(E));
 
         for (P = 0; P < DataSize - 1; ++P)
         {
             Y = Data[P + 1];
             Z = Data[P] += `MX;
 
-            `hrdebug("P       :" @ P);
-            `hrdebug("Z       :" @ ToHex(Z));
-            `hrdebug("Data[P] :" @ ToHex(Data[P]));
+            // `hrdebug("P       :" @ P);
+            // `hrdebug("Z       :" @ ToHex(Z));
+            // `hrdebug("Data[P] :" @ ToHex(Data[P]));
         }
 
         Y = Data[0];
         Z = Data[DataSize - 1] += `MX;
 
-        `hrdebug("Data[DataSize - 1] :" @ ToHex(Data[DataSize - 1]));
-        `hrdebug("Y                  :" @ ToHex(Y));
-        `hrdebug("Z                  :" @ ToHex(Z));
+        // `hrdebug("Data[DataSize - 1] :" @ ToHex(Data[DataSize - 1]));
+        // `hrdebug("Y                  :" @ ToHex(Y));
+        // `hrdebug("Z                  :" @ ToHex(Z));
     }
 }
 
-final private function string WinSockErrorToString(int Error)
+final private function int Pow(int X, int Y, int P)
 {
-    switch (Error)
+    local int Res;
+
+    Res = 1;
+    X = X % P;
+
+    while (Y > 0)
     {
-        case 6:
-            return "WSA_INVALID_HANDLE";
-        case 8:
-            return "WSA_NOT_ENOUGH_MEMORY";
-        case 87:
-            return "WSA_INVALID_PARAMETER";
-        case 995:
-            return "WSA_OPERATION_ABORTED";
-        case 996:
-            return "WSA_IO_INCOMPLETE";
-        case 997:
-            return "WSA_IO_PENDING";
-        case 10004:
-            return "WSAEINTR";
-        case 10009:
-            return "WSAEBADF";
-        case 10013:
-            return "WSAEACCES";
-        case 10014:
-            return "WSAEFAULT";
-        case 10022:
-            return "WSAEINVAL";
-        case 10024:
-            return "WSAEMFILE";
-        case 10035:
-            return "WSAEWOULDBLOCK";
-        case 10036:
-            return "WSAEINPROGRESS";
-        case 10037:
-            return "WSAEALREADY";
-        case 10038:
-            return "WSAENOTSOCK";
-        case 10039:
-            return "WSAEDESTADDRREQ";
-        case 10040:
-            return "WSAEMSGSIZE";
-        case 10041:
-            return "WSAEPROTOTYPE";
-        case 10042:
-            return "WSAENOPROTOOPT";
-        case 10043:
-            return "WSAEPROTONOSUPPORT";
-        case 10044:
-            return "WSAESOCKTNOSUPPORT";
-        case 10045:
-            return "WSAEOPNOTSUPP";
-        case 10046:
-            return "WSAEPFNOSUPPORT";
-        case 10047:
-            return "WSAEAFNOSUPPORT";
-        case 10048:
-            return "WSAEADDRINUSE";
-        case 10049:
-            return "WSAEADDRNOTAVAIL";
-        case 10050:
-            return "WSAENETDOWN";
-        case 10051:
-            return "WSAENETUNREACH";
-        case 10052:
-            return "WSAENETRESET";
-        case 10053:
-            return "WSAECONNABORTED";
-        case 10054:
-            return "WSAECONNRESET";
-        case 10055:
-            return "WSAENOBUFS";
-        case 10056:
-            return "WSAEISCONN";
-        case 10057:
-            return "WSAENOTCONN";
-        case 10058:
-            return "WSAESHUTDOWN";
-        case 10059:
-            return "WSAETOOMANYREFS";
-        case 10060:
-            return "WSAETIMEDOUT";
-        case 10061:
-            return "WSAECONNREFUSED";
-        case 10062:
-            return "WSAELOOP";
-        case 10063:
-            return "WSAENAMETOOLONG";
-        case 10064:
-            return "WSAEHOSTDOWN";
-        case 10065:
-            return "WSAEHOSTUNREACH";
-        case 10066:
-            return "WSAENOTEMPTY";
-        case 10067:
-            return "WSAEPROCLIM";
-        case 10068:
-            return "WSAEUSERS";
-        case 10069:
-            return "WSAEDQUOT";
-        case 10070:
-            return "WSAESTALE";
-        case 10071:
-            return "WSAEREMOTE";
-        case 10091:
-            return "WSASYSNOTREADY";
-        case 10092:
-            return "WSAVERNOTSUPPORTED";
-        case 10093:
-            return "WSANOTINITIALISED";
-        case 10101:
-            return "WSAEDISCON";
-        case 10102:
-            return "WSAENOMORE";
-        case 10103:
-            return "WSAECANCELLED";
-        case 10104:
-            return "WSAEINVALIDPROCTABLE";
-        case 10105:
-            return "WSAEINVALIDPROVIDER";
-        case 10106:
-            return "WSAEPROVIDERFAILEDINIT";
-        case 10107:
-            return "WSASYSCALLFAILURE";
-        case 10108:
-            return "WSASERVICE_NOT_FOUND";
-        case 10109:
-            return "WSATYPE_NOT_FOUND";
-        case 10110:
-            return "WSA_E_NO_MORE";
-        case 10111:
-            return "WSA_E_CANCELLED";
-        case 10112:
-            return "WSAEREFUSED";
-        case 11001:
-            return "WSAHOST_NOT_FOUND";
-        case 11002:
-            return "WSATRY_AGAIN";
-        case 11003:
-            return "WSANO_RECOVERY";
-        case 11004:
-            return "WSANO_DATA";
-        case 11005:
-            return "WSA_QOS_RECEIVERS";
-        case 11006:
-            return "WSA_QOS_SENDERS";
-        case 11007:
-            return "WSA_QOS_NO_SENDERS";
-        case 11008:
-            return "WSA_QOS_NO_RECEIVERS";
-        case 11009:
-            return "WSA_QOS_REQUEST_CONFIRMED";
-        case 11010:
-            return "WSA_QOS_ADMISSION_FAILURE";
-        case 11011:
-            return "WSA_QOS_POLICY_FAILURE";
-        case 11012:
-            return "WSA_QOS_BAD_STYLE";
-        case 11013:
-            return "WSA_QOS_BAD_OBJECT";
-        case 11014:
-            return "WSA_QOS_TRAFFIC_CTRL_ERROR";
-        case 11015:
-            return "WSA_QOS_GENERIC_ERROR";
-        case 11016:
-            return "WSA_QOS_ESERVICETYPE";
-        case 11017:
-            return "WSA_QOS_EFLOWSPEC";
-        case 11018:
-            return "WSA_QOS_EPROVSPECBUF";
-        case 11019:
-            return "WSA_QOS_EFILTERSTYLE";
-        case 11020:
-            return "WSA_QOS_EFILTERTYPE";
-        case 11021:
-            return "WSA_QOS_EFILTERCOUNT";
-        case 11022:
-            return "WSA_QOS_EOBJLENGTH";
-        case 11023:
-            return "WSA_QOS_EFLOWCOUNT";
-        case 11024:
-            return "WSA_QOS_EUNKOWNPSOBJ";
-        case 11025:
-            return "WSA_QOS_EPOLICYOBJ";
-        case 11026:
-            return "WSA_QOS_EFLOWDESC";
-        case 11027:
-            return "WSA_QOS_EPSFLOWSPEC";
-        case 11028:
-            return "WSA_QOS_EPSFILTERSPEC";
-        case 11029:
-            return "WSA_QOS_ESDMODEOBJ";
-        case 11030:
-            return "WSA_QOS_ESHAPERATEOBJ";
-        case 11031:
-            return "WSA_QOS_RESERVED_PETYPE";
-        default:
-            return string(Error);
+        // If Y is odd, multiply X with result.
+        if ((Y & 1) > 0)
+        {
+            Res = (Res * X) % P;
+        }
+
+        // Y must be even now.
+        Y = Y >> 1;  // Y /= 2
+        X = (X * X) % P;
     }
+
+    return Res;
+}
+
+// Less shitty RNG than just Rand() but still pretty shit.
+final private function int XRand()
+{
+    local int X;
+    local int T;
+
+    X = Rand(MaxInt);
+
+    T = (X ^ (X >>> 8)) & Rand(MaxInt); X = X ^ T ^ (T << 8);
+    T = (X ^ (X >>> 4)) & Rand(MaxInt); X = X ^ T ^ (T << 4);
+    T = (X ^ (X >>> 2)) & Rand(MaxInt); X = X ^ T ^ (T << 2);
+    T = (X ^ (X >>> 1)) & Rand(MaxInt); X = X ^ T ^ (T << 1);
+
+    return X;
+}
+
+final private function DH_Generate_KeyPair()
+{
+    local array<byte> Seed;
+    local IpAddr LocalIP;
+    local string ComputerName;
+    local int Idx;
+    local int StrLen;
+    local int Tmp;
+    local int Char;
+    local PlayerReplicationInfo PRI;
+
+    GetLocalIP(LocalIP);
+
+    Seed.Length = 24;
+    Seed[ 0] = (LocalIP.Addr       ) & 0xff;
+    Seed[ 1] = (LocalIP.Addr >>>  8) & 0xff;
+    Seed[ 2] = (LocalIP.Addr >>> 16) & 0xff;
+    Seed[ 3] = (LocalIP.Addr >>> 24) & 0xff;
+    Seed[ 4] = (LocalIP.Port       ) & 0xff;
+    Seed[ 5] = (LocalIP.Port >>>  8) & 0xff;
+    Seed[ 6] = (LocalIP.Port >>> 16) & 0xff;
+    Seed[ 7] = (LocalIP.Port >>> 24) & 0xff;
+    Tmp = XRand();
+    Seed[ 8] = (Tmp       ) & 0xff;
+    Seed[ 9] = (Tmp >>>  8) & 0xff;
+    Seed[10] = (Tmp >>> 16) & 0xff;
+    Seed[11] = (Tmp >>> 24) & 0xff;
+    Tmp = XRand();
+    Seed[12] = (Tmp       ) & 0xff;
+    Seed[13] = (Tmp >>>  8) & 0xff;
+    Seed[14] = (Tmp >>> 16) & 0xff;
+    Seed[15] = (Tmp >>> 24) & 0xff;
+    Tmp = XRand();
+    Seed[16] = (Tmp       ) & 0xff;
+    Seed[17] = (Tmp >>>  8) & 0xff;
+    Seed[18] = (Tmp >>> 16) & 0xff;
+    Seed[19] = (Tmp >>> 24) & 0xff;
+    Tmp = XRand();
+    Seed[20] = (Tmp       ) & 0xff;
+    Seed[21] = (Tmp >>>  8) & 0xff;
+    Seed[22] = (Tmp >>> 16) & 0xff;
+    Seed[23] = (Tmp >>> 24) & 0xff;
+
+    ComputerName = WorldInfo.ComputerName;
+    StrLen = Len(ComputerName);
+    Tmp = Seed.Length;
+    Seed.Length = Tmp + StrLen;
+    --Tmp;
+    for (Idx = 0; Idx < StrLen; ++Idx)
+    {
+        Char = Asc(Mid(ComputerName, Idx, 1));
+        Seed[Tmp + Idx    ] = (Char       ) & 0xff;
+        Seed[Tmp + Idx + 1] = (Char >>>  8) & 0xff;
+        Seed[Tmp + Idx + 2] = (Char >>> 16) & 0xff;
+        Seed[Tmp + Idx + 3] = (Char >>> 24) & 0xff;
+    }
+
+    ForEach DynamicActors(class'PlayerReplicationInfo', PRI)
+    {
+        StrLen = Len(PRI.PlayerName);
+        Tmp = Seed.Length;
+        Seed.Length = Tmp + StrLen + 4;
+        --Tmp;
+        for (Idx = 0; Idx < StrLen; ++Idx)
+        {
+            Char = Asc(Mid(PRI.PlayerName, Idx, 1));
+            Seed[Tmp + Idx    ] = (Char       ) & 0xff;
+            Seed[Tmp + Idx + 1] = (Char >>>  8) & 0xff;
+            Seed[Tmp + Idx + 2] = (Char >>> 16) & 0xff;
+            Seed[Tmp + Idx + 3] = (Char >>> 24) & 0xff;
+        }
+        Seed[Tmp + Idx + 4] = PRI.Ping;
+    }
+
+    for (Idx = 0; Idx < Seed.Length; ++Idx)
+    {
+        Char = Seed[Idx];
+        Tmp = (Char ^ (Char >>> 8)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 8);
+        Tmp = (Char ^ (Char >>> 4)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 4);
+        Tmp = (Char ^ (Char >>> 2)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 2);
+        Tmp = (Char ^ (Char >>> 1)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 1);
+        Seed[Idx] = Char;
+    }
+
+    `hrdebug("Seed.Length:" @ Seed.Length);
+    Sha1Hasher.GetHash(Seed, DH_PrivateKey);
+
+    DH_PublicKey[0] = Pow(DH_P, DH_PrivateKey[0], DH_G);
+    DH_PublicKey[1] = Pow(DH_P, DH_PrivateKey[1], DH_G);
+    DH_PublicKey[2] = Pow(DH_P, DH_PrivateKey[2], DH_G);
+    DH_PublicKey[3] = Pow(DH_P, DH_PrivateKey[3], DH_G);
+
+    `hrdebug("DH_PrivateKey[0]:" @ DH_PrivateKey[0]);
+    `hrdebug("DH_PrivateKey[1]:" @ DH_PrivateKey[1]);
+    `hrdebug("DH_PrivateKey[2]:" @ DH_PrivateKey[2]);
+    `hrdebug("DH_PrivateKey[3]:" @ DH_PrivateKey[3]);
+
+    `hrdebug("DH_PublicKey[0]:" @ DH_PublicKey[0]);
+    `hrdebug("DH_PublicKey[1]:" @ DH_PublicKey[1]);
+    `hrdebug("DH_PublicKey[2]:" @ DH_PublicKey[2]);
+    `hrdebug("DH_PublicKey[3]:" @ DH_PublicKey[3]);
+
+    DH_LocalState = DHLS_KeyPairGenerated;
+}
+
+final private function DH_Generate_SharedSecret()
+{
+    XXTEAKey[0] = Pow(DH_PeerPublicKey[0], DH_PrivateKey[0], DH_P);
+    XXTEAKey[1] = Pow(DH_PeerPublicKey[1], DH_PrivateKey[1], DH_P);
+    XXTEAKey[2] = Pow(DH_PeerPublicKey[2], DH_PrivateKey[2], DH_P);
+    XXTEAKey[3] = Pow(DH_PeerPublicKey[3], DH_PrivateKey[3], DH_P);
+
+    `hrdebug("XXTEAKey[0]:" @ XXTEAKey[0]);
+    `hrdebug("XXTEAKey[1]:" @ XXTEAKey[1]);
+    `hrdebug("XXTEAKey[2]:" @ XXTEAKey[2]);
+    `hrdebug("XXTEAKey[3]:" @ XXTEAKey[3]);
+}
+
+final private function DH_Send_PublicKey()
+{
+    // TODO: const package sizes?
+    SendBufferSize = DH_PUBLIC_KEY_BYTES;
+    SendBuffer[ 0] = SendBufferSize;
+    SendBuffer[ 1] = ProtocolVersion;
+    SendBuffer[ 2] = EPID_DH_PublicKey;
+
+    SendBuffer[ 3] = (DH_PublicKey[0]       ) & 0xff;
+    SendBuffer[ 4] = (DH_PublicKey[0] >>>  8) & 0xff;
+    SendBuffer[ 5] = (DH_PublicKey[0] >>> 16) & 0xff;
+    SendBuffer[ 6] = (DH_PublicKey[0] >>> 24) & 0xff;
+
+    SendBuffer[ 7] = (DH_PublicKey[1]       ) & 0xff;
+    SendBuffer[ 8] = (DH_PublicKey[1] >>>  8) & 0xff;
+    SendBuffer[ 9] = (DH_PublicKey[1] >>> 16) & 0xff;
+    SendBuffer[10] = (DH_PublicKey[1] >>> 24) & 0xff;
+
+    SendBuffer[11] = (DH_PublicKey[2]       ) & 0xff;
+    SendBuffer[12] = (DH_PublicKey[2] >>>  8) & 0xff;
+    SendBuffer[13] = (DH_PublicKey[2] >>> 16) & 0xff;
+    SendBuffer[14] = (DH_PublicKey[2] >>> 24) & 0xff;
+
+    SendBuffer[15] = (DH_PublicKey[3]       ) & 0xff;
+    SendBuffer[16] = (DH_PublicKey[3] >>>  8) & 0xff;
+    SendBuffer[17] = (DH_PublicKey[3] >>> 16) & 0xff;
+    SendBuffer[18] = (DH_PublicKey[3] >>> 24) & 0xff;
+
+    SendBinary(SendBufferSize, SendBuffer);
+    DH_LocalState = DHLS_PublicKeySent;
 }
 
 DefaultProperties
@@ -664,8 +793,10 @@ DefaultProperties
     bRetryOnFail=True
     bConfigured=False
 
-    XXTEAKey(0)=0x2b959f13
-    XXTEAKey(1)=0x330de56a
-    XXTEAKey(2)=0x583e0f76
-    XXTEAKey(3)=0x6b8f3054
+    bDHReady=False
+
+    // XXTEAKey(0)=0x2b959f13
+    // XXTEAKey(1)=0x330de56a
+    // XXTEAKey(2)=0x583e0f76
+    // XXTEAKey(3)=0x6b8f3054
 }

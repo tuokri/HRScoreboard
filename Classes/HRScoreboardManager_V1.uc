@@ -500,11 +500,14 @@ simulated function UpdateRaceStatArrays()
                 }
             }
 
-            ReplicatedRaceStats[Idx].RacePRI = OngoingRaceStats[Idx].RacePRI;
-            ReplicatedRaceStats[Idx].Vehicle = OngoingRaceStats[Idx].Vehicle;
-            ReplicatedRaceStats[Idx].RaceStart = OngoingRaceStats[Idx].RaceStart;
-            ReplicatedRaceStats[Idx].PlayerName = OngoingRaceStats[Idx].PlayerName;
-            ReplicatedRaceStats[Idx].VehicleClassName = OngoingRaceStats[Idx].VehicleClassName;
+            if (Idx < MAX_REPLICATED)
+            {
+                ReplicatedRaceStats[Idx].RacePRI = OngoingRaceStats[Idx].RacePRI;
+                ReplicatedRaceStats[Idx].Vehicle = OngoingRaceStats[Idx].Vehicle;
+                ReplicatedRaceStats[Idx].RaceStart = OngoingRaceStats[Idx].RaceStart;
+                ReplicatedRaceStats[Idx].PlayerName = OngoingRaceStats[Idx].PlayerName;
+                ReplicatedRaceStats[Idx].VehicleClassName = OngoingRaceStats[Idx].VehicleClassName;
+            }
         }
         else
         {
@@ -512,10 +515,9 @@ simulated function UpdateRaceStatArrays()
         }
     }
 
-    ReplicatedRaceStatsCount = OngoingRaceStats.Length;
+    ReplicatedRaceStatsCount = Clamp(OngoingRaceStats.Length, 0, MAX_REPLICATED);
 
-    // TODO: Needless copies? Better way to do this?
-    for (Idx = 0; Idx < FinishedRaces.Length; ++Idx)
+    for (Idx = 0; Idx < FinishedRaces.Length && Idx < MAX_REPLICATED; ++Idx)
     {
         ReplicatedFinishedRaces[Idx].RacePRI = FinishedRaces[Idx].RacePRI;
         ReplicatedFinishedRaces[Idx].Vehicle = FinishedRaces[Idx].Vehicle;
@@ -525,7 +527,7 @@ simulated function UpdateRaceStatArrays()
         ReplicatedFinishedRaces[Idx].VehicleClassName = FinishedRaces[Idx].VehicleClassName;
     }
 
-    ReplicatedFinishedRaceStatsCount = FinishedRaces.Length;
+    ReplicatedFinishedRaceStatsCount = Clamp(FinishedRaces.Length, 0, MAX_REPLICATED);
 }
 
 simulated event PostRenderFor(PlayerController PC, Canvas Canvas, vector CameraPosition, vector CameraDir)
@@ -615,13 +617,11 @@ function TimerLoopDedicatedServer()
 simulated function TimerLoopStandalone()
 {
     UpdateRaceStatArrays();
-    // TODO: is there a better way to do this than check with a timer?
     DrawScoreboard();
 }
 
 simulated function TimerLoopClient()
 {
-    // TODO: is there a better way to do this than check with a timer?
     DrawScoreboard();
 }
 
@@ -672,7 +672,7 @@ DefaultProperties
     SizeTestString="CharacterTestNameString123 99999.99999 sec"
 
     MinWayPointUpdateIntervalSeconds=5.0
-    MaxFinishedRaces=32
+    MaxFinishedRaces=10
 
     MaxStoredTopScoreRaceStatsInConfigFile=50
 
