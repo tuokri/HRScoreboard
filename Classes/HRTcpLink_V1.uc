@@ -2,6 +2,8 @@ class HRTcpLink_V1 extends TcpLink;
 
 var private HRSha1_V1 Sha1Hasher;
 
+var private int XRandSeed;
+
 // XXTEA constants and macros.
 var private int XXTEAKey[4];
 `define MX (((Z>>>5^Y<<2) + (Y>>>3^Z<<4)) ^ ((Sum^Y) + (XXTEAKey[(P&3)^E] ^ Z)))
@@ -48,6 +50,9 @@ struct HRPacket_V1
     var byte ProtocolVersion;
     var byte PacketID;
 
+    var byte Checksum[4];
+    var byte Signature[16];
+
     // Integers for XXTEA. Sent as bytes. Max 248 bytes.
     var int Data[31];
 };
@@ -75,6 +80,8 @@ var private int DataBufferSize;
 event PostBeginPlay()
 {
     super.PostBeginPlay();
+
+    XRandSeed = Rand(MaxInt);
 
     DH_LocalState = DHLS_None;
     DH_RemoteState = DHRS_None;
@@ -591,27 +598,34 @@ final private function XXTEA_Encrypt(out int Data[31], int DataSize)
     }
 }
 
-final private function int Pow(int X, int Y, int P)
+final private function int PowMod(int Base, int Exp, int Modulus)
 {
     local int Res;
 
     Res = 1;
-    X = X % P;
+    Base = Base % Base;
 
-    while (Y > 0)
+    while (Exp > 0)
     {
-        // If Y is odd, multiply X with result.
-        if ((Y & 1) > 0)
+        // If Exp is odd, multiply Base with result.
+        if ((Exp & 1) > 0)
         {
-            Res = (Res * X) % P;
+            Res = (Res * Base) % Modulus;
         }
 
-        // Y must be even now.
-        Y = Y >> 1;  // Y /= 2
-        X = (X * X) % P;
+        // Exp must be even now.
+        Exp = Exp >>> 1;  // Y /= 2
+        Base = (Base * Base) % Modulus;
     }
 
     return Res;
+}
+
+// Based on glibc.
+final private function int _XRand()
+{
+    XRandSeed = ((XRandSeed * 1103515245) + 12345) & 0x7fffffff;
+    return XRandSeed;
 }
 
 // Less shitty RNG than just Rand() but still pretty shit.
@@ -622,28 +636,57 @@ final private function int XRand()
 
     X = Rand(MaxInt);
 
-    T = (X ^ (X >>> 8)) & Rand(MaxInt); X = X ^ T ^ (T << 8);
-    T = (X ^ (X >>> 4)) & Rand(MaxInt); X = X ^ T ^ (T << 4);
-    T = (X ^ (X >>> 2)) & Rand(MaxInt); X = X ^ T ^ (T << 2);
-    T = (X ^ (X >>> 1)) & Rand(MaxInt); X = X ^ T ^ (T << 1);
+    // `hrdebug("Rand()   :" @ ToHex(X));
+    // `hrdebug("_XRand() :" @ ToHex(_XRand()));
 
-    return X;
+    T = (X ^ (X >>> 8)) & _XRand(); X = X ^ T ^ (T << 8);
+    T = (X ^ (X >>> 4)) & _XRand(); X = X ^ T ^ (T << 4);
+    T = (X ^ (X >>> 2)) & _XRand(); X = X ^ T ^ (T << 2);
+    T = (X ^ (X >>> 1)) & _XRand();
+
+    return X ^ T ^ (T << 1);
 }
 
 final private function DH_Generate_KeyPair()
 {
     local array<byte> Seed;
     local IpAddr LocalIP;
-    local string ComputerName;
     local int Idx;
     local int StrLen;
     local int Tmp;
     local int Char;
     local PlayerReplicationInfo PRI;
 
+`ifdef(HRDEBUG)
+    local string XRandTest;
+
+    for (Tmp = 0; Tmp < 10; ++Tmp)
+    {
+        `hrdebug("XRand():" @ ToHex(XRand()));
+    }
+
+    for (Tmp = 0; Tmp < 100; ++Tmp)
+    {
+        for (Idx = 0; Idx < 25; ++Idx)
+        {
+            Char = XRand();
+            XRandTest $= byte((Char       ) & 0xff) $ ",";
+            XRandTest $= byte((Char >>>  8) & 0xff) $ ",";
+            XRandTest $= byte((Char >>> 16) & 0xff) $ ",";
+            XRandTest $= byte((Char >>> 24) & 0xff) $ ",";
+        }
+        `hrdebug(XRandTest);
+        XRandTest = "";
+    }
+
+    Idx = 0;
+    Tmp = 0;
+    Char = 0;
+`endif
+
     GetLocalIP(LocalIP);
 
-    Seed.Length = 24;
+    Seed.Length = 25;
     Seed[ 0] = (LocalIP.Addr       ) & 0xff;
     Seed[ 1] = (LocalIP.Addr >>>  8) & 0xff;
     Seed[ 2] = (LocalIP.Addr >>> 16) & 0xff;
@@ -653,34 +696,39 @@ final private function DH_Generate_KeyPair()
     Seed[ 6] = (LocalIP.Port >>> 16) & 0xff;
     Seed[ 7] = (LocalIP.Port >>> 24) & 0xff;
     Tmp = XRand();
+    `hrdebug("Tmp:" @ Tmp);
     Seed[ 8] = (Tmp       ) & 0xff;
     Seed[ 9] = (Tmp >>>  8) & 0xff;
     Seed[10] = (Tmp >>> 16) & 0xff;
     Seed[11] = (Tmp >>> 24) & 0xff;
     Tmp = XRand();
+    `hrdebug("Tmp:" @ Tmp);
     Seed[12] = (Tmp       ) & 0xff;
     Seed[13] = (Tmp >>>  8) & 0xff;
     Seed[14] = (Tmp >>> 16) & 0xff;
     Seed[15] = (Tmp >>> 24) & 0xff;
     Tmp = XRand();
+    `hrdebug("Tmp:" @ Tmp);
     Seed[16] = (Tmp       ) & 0xff;
     Seed[17] = (Tmp >>>  8) & 0xff;
     Seed[18] = (Tmp >>> 16) & 0xff;
     Seed[19] = (Tmp >>> 24) & 0xff;
     Tmp = XRand();
+    `hrdebug("Tmp:" @ Tmp);
     Seed[20] = (Tmp       ) & 0xff;
     Seed[21] = (Tmp >>>  8) & 0xff;
     Seed[22] = (Tmp >>> 16) & 0xff;
     Seed[23] = (Tmp >>> 24) & 0xff;
 
-    ComputerName = WorldInfo.ComputerName;
-    StrLen = Len(ComputerName);
+    Seed[24] = WorldInfo.Game.GetNumPlayers();
+
+    StrLen = Len(WorldInfo.ComputerName);
     Tmp = Seed.Length;
     Seed.Length = Tmp + StrLen;
     --Tmp;
     for (Idx = 0; Idx < StrLen; ++Idx)
     {
-        Char = Asc(Mid(ComputerName, Idx, 1));
+        Char = Asc(Mid(WorldInfo.ComputerName, Idx, 1));
         Seed[Tmp + Idx    ] = (Char       ) & 0xff;
         Seed[Tmp + Idx + 1] = (Char >>>  8) & 0xff;
         Seed[Tmp + Idx + 2] = (Char >>> 16) & 0xff;
@@ -691,7 +739,7 @@ final private function DH_Generate_KeyPair()
     {
         StrLen = Len(PRI.PlayerName);
         Tmp = Seed.Length;
-        Seed.Length = Tmp + StrLen + 4;
+        Seed.Length = Tmp + StrLen;
         --Tmp;
         for (Idx = 0; Idx < StrLen; ++Idx)
         {
@@ -701,26 +749,85 @@ final private function DH_Generate_KeyPair()
             Seed[Tmp + Idx + 2] = (Char >>> 16) & 0xff;
             Seed[Tmp + Idx + 3] = (Char >>> 24) & 0xff;
         }
-        Seed[Tmp + Idx + 4] = PRI.Ping;
+
+        Seed[Seed.Length] = PRI.Ping;
+
+        StrLen = Len(PRI.SavedNetworkAddress);
+        Tmp = Seed.Length;
+        Seed.Length = Tmp + StrLen;
+        --Tmp;
+        for (Idx = 0; Idx < StrLen; ++Idx)
+        {
+            Char = Asc(Mid(PRI.SavedNetworkAddress, Idx, 1));
+            Seed[Tmp + Idx    ] = (Char       ) & 0xff;
+            Seed[Tmp + Idx + 1] = (Char >>>  8) & 0xff;
+            Seed[Tmp + Idx + 2] = (Char >>> 16) & 0xff;
+            Seed[Tmp + Idx + 3] = (Char >>> 24) & 0xff;
+        }
+
+        Tmp = Seed.Length;
+        Seed.Length = Tmp + 8;
+        --Tmp;
+        Seed[Tmp    ] = (PRI.UniqueId.Uid.A       ) & 0xff;
+        Seed[Tmp + 1] = (PRI.UniqueId.Uid.A >>>  8) & 0xff;
+        Seed[Tmp + 2] = (PRI.UniqueId.Uid.A >>> 16) & 0xff;
+        Seed[Tmp + 3] = (PRI.UniqueId.Uid.A >>> 24) & 0xff;
+        Seed[Tmp + 4] = (PRI.UniqueId.Uid.B       ) & 0xff;
+        Seed[Tmp + 5] = (PRI.UniqueId.Uid.B >>>  8) & 0xff;
+        Seed[Tmp + 6] = (PRI.UniqueId.Uid.B >>> 16) & 0xff;
+        Seed[Tmp + 7] = (PRI.UniqueId.Uid.B >>> 24) & 0xff;
+
+        if (FRand() > 0.5)
+        {
+            Idx = Seed.Length;
+            Tmp = XRand();
+            Seed[Idx    ] = (Tmp       ) & 0xff;
+            Seed[Idx + 1] = (Tmp >>>  8) & 0xff;
+            Seed[Idx + 2] = (Tmp >>> 16) & 0xff;
+            Seed[Idx + 3] = (Tmp >>> 24) & 0xff;
+        }
     }
 
-    for (Idx = 0; Idx < Seed.Length; ++Idx)
+    // TODO: Seed needs padding.
+
+    Tmp = 0;
+    Idx = 0;
+    while (Idx < Seed.Length)
     {
-        Char = Seed[Idx];
-        Tmp = (Char ^ (Char >>> 8)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 8);
-        Tmp = (Char ^ (Char >>> 4)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 4);
-        Tmp = (Char ^ (Char >>> 2)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 2);
-        Tmp = (Char ^ (Char >>> 1)) & Rand(MaxInt); Char = Char ^ Tmp ^ (Tmp << 1);
-        Seed[Idx] = Char;
+        Char = (
+               (Seed[Idx    ]        & 0xff)
+            | ((Seed[Idx + 1] <<  8) & 0xff)
+            | ((Seed[Idx + 2] << 16) & 0xff)
+            | ((Seed[Idx + 3] << 24) & 0xff)
+        );
+
+        `hrdebug("A Seed" @ Idx @ ToHex(Char));
+
+        Tmp = (Char ^ (Char >>> 8)) & _XRand(); Char = Char ^ Tmp ^ (Tmp << 8);
+        Tmp = (Char ^ (Char >>> 4)) & _XRand(); Char = Char ^ Tmp ^ (Tmp << 4);
+        Tmp = (Char ^ (Char >>> 2)) & _XRand(); Char = Char ^ Tmp ^ (Tmp << 2);
+        Tmp = (Char ^ (Char >>> 1)) & _XRand(); Char = Char ^ Tmp ^ (Tmp << 1);
+
+        Seed[Idx    ] = (Char       ) & 0xff;
+        Seed[Idx + 1] = (Char >>>  8) & 0xff;
+        Seed[Idx + 2] = (Char >>> 16) & 0xff;
+        Seed[Idx + 3] = (Char >>> 24) & 0xff;
+
+        Idx += 4;
+
+        `hrdebug("B Seed" @ Idx @ ToHex(Char));
     }
 
     `hrdebug("Seed.Length:" @ Seed.Length);
-    Sha1Hasher.GetHash(Seed, DH_PrivateKey);
 
-    DH_PublicKey[0] = Pow(DH_P, DH_PrivateKey[0], DH_G);
-    DH_PublicKey[1] = Pow(DH_P, DH_PrivateKey[1], DH_G);
-    DH_PublicKey[2] = Pow(DH_P, DH_PrivateKey[2], DH_G);
-    DH_PublicKey[3] = Pow(DH_P, DH_PrivateKey[3], DH_G);
+    // XXTEA key is 128 bits -> use truncated SHA-1.
+    // Doing tricks since PowMod doesn't like negative integers.
+    Sha1Hasher.GetHash(Seed, DH_PrivateKey, True);
+
+    DH_PublicKey[0] = PowMod(DH_P, DH_PrivateKey[0], DH_G);
+    DH_PublicKey[1] = PowMod(DH_P, DH_PrivateKey[1], DH_G);
+    DH_PublicKey[2] = PowMod(DH_P, DH_PrivateKey[2], DH_G);
+    DH_PublicKey[3] = PowMod(DH_P, DH_PrivateKey[3], DH_G);
 
     `hrdebug("DH_PrivateKey[0]:" @ DH_PrivateKey[0]);
     `hrdebug("DH_PrivateKey[1]:" @ DH_PrivateKey[1]);
@@ -737,10 +844,10 @@ final private function DH_Generate_KeyPair()
 
 final private function DH_Generate_SharedSecret()
 {
-    XXTEAKey[0] = Pow(DH_PeerPublicKey[0], DH_PrivateKey[0], DH_P);
-    XXTEAKey[1] = Pow(DH_PeerPublicKey[1], DH_PrivateKey[1], DH_P);
-    XXTEAKey[2] = Pow(DH_PeerPublicKey[2], DH_PrivateKey[2], DH_P);
-    XXTEAKey[3] = Pow(DH_PeerPublicKey[3], DH_PrivateKey[3], DH_P);
+    XXTEAKey[0] = PowMod(DH_PeerPublicKey[0], DH_PrivateKey[0], DH_P);
+    XXTEAKey[1] = PowMod(DH_PeerPublicKey[1], DH_PrivateKey[1], DH_P);
+    XXTEAKey[2] = PowMod(DH_PeerPublicKey[2], DH_PrivateKey[2], DH_P);
+    XXTEAKey[3] = PowMod(DH_PeerPublicKey[3], DH_PrivateKey[3], DH_P);
 
     `hrdebug("XXTEAKey[0]:" @ XXTEAKey[0]);
     `hrdebug("XXTEAKey[1]:" @ XXTEAKey[1]);

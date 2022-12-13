@@ -1,21 +1,68 @@
+// SHA-1 hashing based on Sha1HashLib.uc with some modifications.
+// See also: https://beyondunrealwiki.github.io/pages/sha1hash.html.
 class HRSha1_V1 extends Object
     abstract;
 
 var private int Hash[5];
 var private array<byte> Data;
 
-final function GetHash(const out array<byte> InputData, out int out_Hash[4])
+final function GetHash(
+    const out array<byte> InputData,
+    out int out_Hash[4],
+    optional bool bNoNegatives = False)
 {
+    local array<byte> GoodIndices;
+    local array<byte> BadIndices;
+    local byte Idx;
+
     Data = InputData;
     CalcHash();
 
-    out_Hash[0] = Hash[0];
-    out_Hash[1] = Hash[1];
-    out_Hash[2] = Hash[2];
-    out_Hash[3] = Hash[3];
+    if (bNoNegatives)
+    {
+        for (Idx = 0; Idx < ArrayCount(Hash); ++Idx)
+        {
+            if (Hash[Idx] > 0)
+            {
+                GoodIndices.AddItem(Idx);
+            }
+            else
+            {
+                BadIndices.AddItem(Idx);
+            }
+        }
 
-    // Just truncate it for our purposes.
-    // out_Hash[4] = Hash[4];
+        // Got enough positive integers -> just get them.
+        if (GoodIndices.Length >= ArrayCount(out_Hash))
+        {
+            out_Hash[0] = Hash[GoodIndices[0]];
+            out_Hash[1] = Hash[GoodIndices[1]];
+            out_Hash[2] = Hash[GoodIndices[2]];
+            out_Hash[3] = Hash[GoodIndices[3]];
+            return;
+        }
+
+        // Did not get enough positive integers -> get the ones
+        // that are positive and handle the rest with some trickery.
+        for (Idx = 0; Idx < GoodIndices.Length; ++Idx)
+        {
+            out_Hash[Idx] = Hash[GoodIndices[Idx]];
+        }
+
+        while (Idx < ArrayCount(out_Hash))
+        {
+            out_hash[Idx] = Hash[BadIndices.Length];
+            ++Idx;
+            BadIndices.Length = BadIndices.Length - 1;
+        }
+    }
+    else
+    {
+        out_Hash[0] = Hash[0];
+        out_Hash[1] = Hash[1];
+        out_Hash[2] = Hash[2];
+        out_Hash[3] = Hash[3];
+    }
 }
 
 private final function CalcHash()
