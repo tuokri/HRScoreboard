@@ -1,9 +1,11 @@
-import random
-
 import numpy as np
 from PIL import Image
 
 XRAND_SEED = np.uint32(0)
+
+
+def rand_u32() -> np.uint32:
+    return np.uint32(np.random.randint(0, 2 ** 32 - 1, dtype=np.uint32))
 
 
 # Based on glibc.
@@ -12,7 +14,7 @@ def _xrand() -> np.uint32:
 
     # Glibc uses this algorithm when initial state is 8 bytes.
     if XRAND_SEED == 0:
-        XRAND_SEED = np.random.randint(0, 2 ** 32 - 1, dtype=np.uint32)
+        XRAND_SEED = rand_u32()
 
     # val = ((state * 1103515245) + 12345) & 0x7fffffff
 
@@ -33,16 +35,16 @@ def shuffle(x: np.uint32) -> np.uint32:
 
 
 def xrand() -> int:
-    return shuffle(np.random.randint(0, 2 ** 32 - 1, dtype=np.uint32))
+    return shuffle(rand_u32())
 
 
 # Some visual randomness tests.
 def main():
     for _ in range(10):
-        test = random.randint(0, 2 ** 32)
+        test = rand_u32()
         test_s = int(shuffle(test))
         print(hex(test), hex(test_s))
-        print(test.bit_length(), test_s.bit_length())
+        print(int(test).bit_length(), test_s.bit_length())
         print("...")
 
     zz = 0
@@ -58,6 +60,14 @@ def main():
 
     im = Image.fromarray(a).convert("L")
     im.show()
+
+    b = np.zeros((100, 100), dtype=np.uint8)
+    with open("rand.txt", mode="r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            b[i] = np.fromstring(line.strip(), sep=",")
+
+    im_uscript = Image.fromarray(b).convert("L")
+    im_uscript.show()
 
 
 if __name__ == "__main__":
