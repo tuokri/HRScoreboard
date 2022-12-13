@@ -59,7 +59,7 @@ def main():
             zz = z * 4
 
     im = Image.fromarray(a).convert("L")
-    im.save("python_random.bmp")
+    im.save("python_random.png")
     im.show()
 
     b = np.zeros((100, 100), dtype=np.uint8)
@@ -70,7 +70,7 @@ def main():
                 b[i] = np.fromstring(data, sep=",")
 
     im_uscript = Image.fromarray(b).convert("L")
-    im_uscript.save("uscript_random.bmp")
+    im_uscript.save("uscript_random.png")
     im_uscript.show()
 
 
