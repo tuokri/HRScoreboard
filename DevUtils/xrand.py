@@ -12,7 +12,7 @@ def _xrand() -> np.uint32:
 
     # Glibc uses this algorithm when initial state is 8 bytes.
     if XRAND_SEED == 0:
-        XRAND_SEED = np.random.randint(0, 2**32 - 1, dtype=np.uint32)
+        XRAND_SEED = np.random.randint(0, 2 ** 32 - 1, dtype=np.uint32)
 
     # val = ((state * 1103515245) + 12345) & 0x7fffffff
 
@@ -33,13 +33,13 @@ def shuffle(x: np.uint32) -> np.uint32:
 
 
 def xrand() -> int:
-    return shuffle(np.random.randint(0, 2**32 - 1, dtype=np.uint32))
+    return shuffle(np.random.randint(0, 2 ** 32 - 1, dtype=np.uint32))
 
 
 # Some visual randomness tests.
 def main():
     for _ in range(10):
-        test = random.randint(0, 2**32)
+        test = random.randint(0, 2 ** 32)
         test_s = int(shuffle(test))
         print(hex(test), hex(test_s))
         print(test.bit_length(), test_s.bit_length())
