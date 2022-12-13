@@ -59,14 +59,18 @@ def main():
             zz = z * 4
 
     im = Image.fromarray(a).convert("L")
+    im.save("python_random.bmp")
     im.show()
 
     b = np.zeros((100, 100), dtype=np.uint8)
     with open("rand.txt", mode="r", encoding="utf-8") as f:
         for i, line in enumerate(f):
-            b[i] = np.fromstring(line.strip(), sep=",")
+            data = line.strip()
+            if data:
+                b[i] = np.fromstring(data, sep=",")
 
     im_uscript = Image.fromarray(b).convert("L")
+    im_uscript.save("uscript_random.bmp")
     im_uscript.show()
 
 
