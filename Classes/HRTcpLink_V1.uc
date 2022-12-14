@@ -1,5 +1,7 @@
 class HRTcpLink_V1 extends TcpLink;
 
+var private HRCurve25519_V1 Curve25519Provider;
+var private HRXXTea_V1 XXTEAProvider;
 var private HRSha1_V1 Sha1Hasher;
 
 var private int XRandSeed;
@@ -11,7 +13,7 @@ const DELTA = 0x9e3779b9;
 
 // Diffie-Hellman key generation.
 const DH_P = 0x71d0d8bf;
-const DH_G = 7;
+const DH_G = 5;
 var private int DH_PrivateKey[4];
 var private int DH_PublicKey[4];
 var private int DH_PeerPublicKey[4];
@@ -85,6 +87,16 @@ event PostBeginPlay()
 
     DH_LocalState = DHLS_None;
     DH_RemoteState = DHRS_None;
+
+    if (Curve25519Provider == None)
+    {
+        Curve25519Provider = new(self) class'HRCurve25519_V1';
+    }
+
+    if (XXTEAProvider == None)
+    {
+        XXTEAProvider = new(self) class'HRXXTea_V1';
+    }
 
     if (Sha1Hasher == None)
     {
@@ -598,24 +610,67 @@ final private function XXTEA_Encrypt(out int Data[31], int DataSize)
     }
 }
 
-final private function int PowMod(int Base, int Exp, int Modulus)
+final private function int MulMod(int A, int B, int Modulus)
+{
+    local int Result;
+    local int Temp;
+
+    A = A % Modulus;
+    B = B % Modulus;
+
+    if (A <= 0xffff && B <= 0xffff)
+    {
+        return (A * B) % Modulus;
+    }
+
+    // TODO: check if XOR-swap is viable here.
+    if (B > A)
+    {
+        Temp = B;
+        B = A;
+        A = Temp;
+    }
+
+    while (A > 0 && B > 0)
+    {
+        if ((B & 1) > 0)
+        {
+            Result += A;
+        }
+        if (Result >= Modulus)
+        {
+            Result -= Modulus;
+        }
+
+        A = A << 1;
+        if (A >= Modulus)
+        {
+            A -= Modulus;
+        }
+
+        B = B >>> 1;
+    }
+
+    return Result;
+}
+
+final private function int PowMod(int _Base, int Exp, int Modulus)
 {
     local int Res;
 
     Res = 1;
-    Base = Base % Base;
 
     while (Exp > 0)
     {
-        // If Exp is odd, multiply Base with result.
+        // If Exp is odd, multiply B with result.
         if ((Exp & 1) > 0)
         {
-            Res = (Res * Base) % Modulus;
+            Res = MulMod(Res, _Base, Modulus);
         }
 
+        _Base = MulMod(_Base, _Base, Modulus);
         // Exp must be even now.
-        Exp = Exp >>> 1;  // Y /= 2
-        Base = (Base * Base) % Modulus;
+        Exp = Exp >>> 1;
     }
 
     return Res;
@@ -824,10 +879,10 @@ final private function DH_Generate_KeyPair()
     // Doing tricks since PowMod doesn't like negative integers.
     Sha1Hasher.GetHash(Seed, DH_PrivateKey, True);
 
-    DH_PublicKey[0] = PowMod(DH_P, DH_PrivateKey[0], DH_G);
-    DH_PublicKey[1] = PowMod(DH_P, DH_PrivateKey[1], DH_G);
-    DH_PublicKey[2] = PowMod(DH_P, DH_PrivateKey[2], DH_G);
-    DH_PublicKey[3] = PowMod(DH_P, DH_PrivateKey[3], DH_G);
+    DH_PublicKey[0] = PowMod(DH_G, DH_PrivateKey[0], DH_P);
+    DH_PublicKey[1] = PowMod(DH_G, DH_PrivateKey[1], DH_P);
+    DH_PublicKey[2] = PowMod(DH_G, DH_PrivateKey[2], DH_P);
+    DH_PublicKey[3] = PowMod(DH_G, DH_PrivateKey[3], DH_P);
 
     `hrdebug("DH_PrivateKey[0]:" @ DH_PrivateKey[0]);
     `hrdebug("DH_PrivateKey[1]:" @ DH_PrivateKey[1]);
